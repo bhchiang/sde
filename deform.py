@@ -68,40 +68,66 @@ class DeformableConv(nn.Module):
         offsets = jnp.reshape(
             offsets, (batch_size, out_h, out_w, -1, 2, self.num_deform_groups))
 
-        # Get offset pixel values
-        def _wrap(in_h, in_w):
-            ys = jnp.arange(self.dilated_pad_y, in_h - self.dilated_pad_y,
-                            self.stride_y)
-            xs = jnp.arange(self.dilated_pad_x, in_w - self.dilated_pad_x,
-                            self.stride_x)
+        # Convolution indices
+        ys = jnp.arange(self.dilated_pad_y, in_h - self.dilated_pad_y,
+                        self.stride_y)
+        xs = jnp.arange(self.dilated_pad_x, in_w - self.dilated_pad_x,
+                        self.stride_x)
+        assert len(ys) == out_h
+        assert len(xs) == out_w
+        us, vs = jnp.meshgrid(xs, ys)
 
-            assert len(ys) == out_h
-            assert len(xs) == out_w
+        # Kernel indices
+        kernel_ys = jnp.arange(-self.dilated_pad_y, self.dilated_pad_y + 1,
+                               self.dilation_y)
+        kernel_xs = jnp.arange(-self.dilated_pad_x, self.dilated_pad_x + 1,
+                               self.dilation_x)
+        kernel_us, kernel_vs = jnp.meshgrid(kernel_xs, kernel_ys)
 
-            us, vs = jnp.meshgrid(xs, ys)
+        def _wrap(_volume, _image_offsets):
+            """
+            _image_offsets = (out_h, out_w, filter_h * filter_w, 2)
+            """
+            def _retrieve(y, x, _kernel_offsets):
+                """
+                _kernel_offsets = (filter_h * filter_w, 2)
+                """
+                def _pixel(_y, _x, _pixel_offset):
+                    """Retrieve offset pixel values
+                    _pixel_offset = (2, )
+                    """
+                    dy, dx = _pixel_offset
+                    return _volume[y + _y, x + _x]
 
+                # embed()
+                _kernel_offsets = jnp.reshape(
+                    _kernel_offsets, (self.filter_h, self.filter_w, 2))
+                return jax.vmap(jax.vmap(_pixel))(kernel_vs, kernel_us,
+                                                  _kernel_offsets)
+
+            # _retrieve(vs[10, 0], us[10, 0], _offsets[10, 0])
+            pixels = jax.vmap(jax.vmap(_retrieve))(vs, us, _image_offsets)
             # embed()
-            kernel_ys = jnp.arange(-self.dilated_pad_y, self.dilated_pad_y + 1,
-                                   self.dilation_y)
-            kernel_xs = jnp.arange(-self.dilated_pad_x, self.dilated_pad_x + 1,
-                                   self.dilation_x)
-            kernel_us, kernel_vs = jnp.meshgrid(kernel_xs, kernel_ys)
+            return pixels
 
-            def _retrieve(y, x):
-                # Retrieve pixel values
-                def _pixel(_y, _x):
-                    return volume[0, y + _y, x + _x]
+        _volume = volume[0]
+        _offsets = offsets[0, ..., 0]
 
-                return jax.vmap(jax.vmap(_pixel))(kernel_vs, kernel_us)
+        y = _wrap(_volume, _offsets)
 
-            _retrieve(vs[10, 0], us[10, 0])
-            # a = jax.vmap(jax.vmap(_retrieve))(vs, us)
-            embed()
-            return ys, xs
+        def __wrap(_volume, _group_offsets):
+            # (2) Map over num_deform_groups dimension for offsets
+            return jax.vmap(_wrap, in_axes=(None, -1))(_volume, _group_offsets)
 
-        y = _wrap(in_h, in_w)
+        # (1) Map over batch dimension for volume, offsets
+        return jax.vmap(__wrap)(volume, offsets)  # Batch
+        return y
+        # embed()
+
+        # Depth-wise convolution
+
+        # Add up
         # return y
-        embed()
 
 
 x_k, m_k = jax.random.split(jax.random.PRNGKey(0), 2)
