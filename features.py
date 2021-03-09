@@ -68,6 +68,7 @@ def conv1x1(features, stride=1):
     """1x1 convolution"""
     #lhs: a rank `n+2` dimensional input array.
     # rhs: a rank `n+2` dimensional array of kernel weights.
+
     return nn.Conv(features=features, kernel_size=(1, 1), strides=(stride, stride), padding='VALID', use_bias=False)
     # return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
@@ -161,7 +162,7 @@ class BasicBlock(nn.Module):
 
 class AANetFeature(nn.Module):
     # in_planes: int = 32
-    in_channels = int=32
+    in_channels = int = 32
     groups: int = 1
     width_per_group: int = 64
     feature_mdconv: bool = True
@@ -169,13 +170,12 @@ class AANetFeature(nn.Module):
 
 
     def setup(self):
-        layers = [3, 4, 6]  # ResNet-40
 
         # self.inplanes = 64
         self.inplanes = self.in_channels
         self.dilation = 1
 
-        self.groups = self.groups
+        #self.groups = self.groups
         self.base_width = self.width_per_group
 
 
@@ -186,13 +186,13 @@ class AANetFeature(nn.Module):
         #                            nn.BatchNorm(self.inplanes),
         #                            nn.relu(inplace=True))  # H/3
 
-        self.layer1 = self.apply_layer(Bottleneck, self.in_channels, layers[0])  # H/3
-        self.layer2 = self.apply_layer(Bottleneck, self.in_channels * 2, layers[1], stride=2)  # H/6
+        # self.layer1 = self.apply_layer(Bottleneck, self.in_channels, layers[0])  # H/3
+        # self.layer2 = self.apply_layer(Bottleneck, self.in_channels * 2, layers[1], stride=2)  # H/6
 
         # block = DeformBottleneck if self.feature_mdconv else Bottleneck
-        block = Bottleneck # TODO: change this back to above
-
-        self.layer3 = self.apply_layer(block, self.in_channels * 4, layers[2], stride=2)  # H/12
+        # block = Bottleneck # TODO: change this back to above
+        #
+        # self.layer3 = self.apply_layer(block, self.in_channels * 4, layers[2], stride=2)  # H/12
 
         # for m in self.modules():
         #     if isinstance(m, nn.Conv):  #DONE
@@ -211,17 +211,19 @@ class AANetFeature(nn.Module):
         #         elif isinstance(m, BasicBlock):
         #             nn.init.constant_(m.bn2.weight, 0)  #
 
-    def apply_layer(self, x,  block, planes, blocks, stride=1, dilate=False):
-        norm_layer = self._norm_layer
+    def apply_layer(self, x, block, planes, blocks, stride=1, dilate=False):
+        norm_layer = self.norm_layer
         downsample = None
         previous_dilation = self.dilation
+        # dilation = self.dilation
         if dilate:
             self.dilation *= stride #TODO: local variable: dilation
             stride = 1
-        if stride != 1 or self.inplanes != planes * block.expansion:
-            # TODO: fix this
-            downsample = conv1x1(self.inplanes, planes * block.expansion, stride)(x)
-            downsample = norm_layer(downsample)
+
+        # if stride != 1 or self.inplanes != planes * block.expansion:
+        #     # TODO: fix this conv 1x1 gives error
+        #     downsample = conv1x1(planes * block.expansion, stride)(x)
+        #     downsample = norm_layer(downsample)
             # planes * block.expansion
 
             # downsample = nn.Sequential(
@@ -229,16 +231,16 @@ class AANetFeature(nn.Module):
             #     norm_layer(planes * block.expansion),
             # )
 
-        layers = []
+        # layers = []
         #x = block(----)(x)
-        x = block(self.inplanes, planes, stride, downsample, self.groups,
+        x = block(planes, stride, downsample, self.groups,
                             self.base_width, previous_dilation, norm_layer)(x)
         # layers.append(block(self.inplanes, planes, stride, downsample, self.groups,
         #                     self.base_width, previous_dilation, norm_layer))
 
         self.inplanes = planes * block.expansion
         for _ in range(1, blocks):
-            x = block(self.inplanes, planes, groups=self.groups,
+            x = block(planes, groups=self.groups,
                                 base_width=self.base_width, dilation=self.dilation,
                                 norm_layer=norm_layer)(x)
             # layers.append(block(self.inplanes, planes, groups=self.groups,
@@ -252,18 +254,25 @@ class AANetFeature(nn.Module):
     def __call__(self, x):  # TODO: call
         stride = 3
 
-        # copied over from init! TODO: chekc inputs, etc
-        # nn conv -> in channels = 3, out channels = 7?!
-
         #TODO: check the padding
-        x = nn.Conv(3, self.inplanes, kernel_size=(7,7), stride=(stride,stride), padding=(3,3), use_bias=False, scale_init=kaiming_normal)(x)
+        # nn.Conv2d(3, self.inplanes, kernel_size=7, stride=stride, padding=3, bias=False),
+
+        # x = nn.Conv(self.inplanes, kernel_size=(7,7), strides=(stride,stride), padding=(3,3), use_bias=False, kernel_init=kaiming_normal(dtype=jnp.float64))(x)
         x = nn.BatchNorm(self.inplanes, scale_init=nn.initializers.ones, bias_init=nn.initializers.zeros)(x)
         x = nn.relu(x)  # H/3
 
+        layers = [3, 4, 6]  # ResNet-40
+
         # TODO: enough inputs!?
-        layer1 = self.apply_layer(x)
-        layer2 = self.apply_layer(layer1)
-        layer3 = self.apply_layer(layer2)
+        #x,  block, planes, blocks, stride=1, dilate=False):
+        layer1 = self.apply_layer(x, Bottleneck, self.in_channels, layers[0])  # H/3
+
+        layer2 = self.apply_layer(x, Bottleneck, self.in_channels * 2, layers[1], stride=2)  # H/6
+
+        # block = DeformBottleneck if self.feature_mdconv else Bottleneck
+        block = Bottleneck # TODO: change this back to above
+        layer3 = self.apply_layer(x, block, self.in_channels * 4, layers[2], stride=2)  # H/12
+
 
         return [layer1, layer2, layer3]
 
@@ -282,7 +291,7 @@ x = random.uniform(key1, (4,4))
     # base_width: int = 64
     # dilation: int = 1
 
-model = AANetFeature(32)
+model = Bottleneck(32)
 init_variables = model.init(key2, x)
 
 print("hi")
