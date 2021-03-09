@@ -6,10 +6,12 @@ from jax import random
 import numpy as onp
 import jax
 from IPython import embed
-
+import jax.nn.initializers as init
+import jax.scipy.ndimage as jscipy
 ModuleDef = Any
 
-kaiming_normal = partial(jax.nn.initializers.variance_scaling, 2.0, "fan_out", "truncated_normal")
+#TODO: using the default scaling of 2 from jax initializer but is this what we rly want...
+kaiming_normal = partial(init.variance_scaling, 2.0, "fan_out", "truncated_normal")
 
 
 def dilated_conv3x3(x, features, strides=1, groups=1, dilation=1, name='dilated_conv3x3'):
@@ -28,59 +30,6 @@ def conv1x1(features, stride=1):
     return nn.Conv(features=features, kernel_size=(1, 1), strides=(stride,stride), padding='VALID', use_bias=False)
     # return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
-
-
-#
-# class FeaturePyramidNetwork(nn.Module):
-#     def __init__(self, in_channels, out_channels=128,
-#                  num_levels=3):
-#         # FPN paper uses 256 out channels by default
-#         super(FeaturePyramidNetwork, self).__init__()
-#
-#         assert isinstance(in_channels, list)
-#
-#         self.in_channels = in_channels
-#
-#         self.lateral_convs = nn.ModuleList()
-#         self.fpn_convs = nn.ModuleList()
-#
-#         for i in range(num_levels):
-#             lateral_conv = nn.Conv2d(in_channels[i], out_channels, 1)
-#             fpn_conv = nn.Sequential(
-#                 nn.Conv2d(out_channels, out_channels, 3, padding=1),
-#                 nn.BatchNorm2d(out_channels),
-#                 nn.ReLU(inplace=True))
-#
-#             self.lateral_convs.append(lateral_conv)
-#             self.fpn_convs.append(fpn_conv)
-#
-#         # Initialize weights
-#         for m in self.modules():
-#             if isinstance(m, nn.Conv2d):
-#                 nn.init.xavier_uniform_(m.weight, gain=1)
-#                 if hasattr(m, 'bias'):
-#                     nn.init.constant_(m.bias, 0)
-#
-#     def forward(self, inputs):
-#         # Inputs: resolution high -> low
-#         assert len(self.in_channels) == len(inputs)
-#
-#         # Build laterals
-#         laterals = [lateral_conv(inputs[i])
-#                     for i, lateral_conv in enumerate(self.lateral_convs)]
-#
-#         # Build top-down path
-#         used_backbone_levels = len(laterals)
-#         for i in range(used_backbone_levels - 1, 0, -1):
-#             laterals[i - 1] += F.interpolate(
-#                 laterals[i], scale_factor=2, mode='nearest')
-#
-#         # Build outputs
-#         out = [
-#             self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)
-#         ]
-#
-#         return out
 
 class Bottleneck(nn.Module):
   """Bottleneck ResNet block."""
@@ -245,7 +194,6 @@ class FeaturePyrmaid(nn.Module):
     @nn.compact
     def __call__(self, x):
         # x: [B, 32, H, W]
-
         # out1 = [B, 64, H/2, W/2]
         out1 = nn.Conv(self.in_channel * 2, kernel_size=(3,3), strides=(2,2), padding=((1,1),(1,1)), use_bias=False)(x)
         out1 = nn.BatchNorm(self.in_channel * 2)(out1)
@@ -265,6 +213,106 @@ class FeaturePyrmaid(nn.Module):
         return [x, out1, out2]
 
 
+class FeaturePyramidNetwork(nn.Module):
+    #in_channels: list    TODO: uncomment this when done testing
+    out_channels: int = 128
+    num_levels: int = 3
+
+    # FPN paper uses 256 out channels by default
+    def setup(self):
+        self.in_channels= [10]*3   # TODO: remove this hardcoded default value after testing and uncomment above TODO
+    #     assert isinstance(self.in_channels, list)
+    #     lateral_convs = nn.ModuleList()
+    #     # self.lateral_convs = nn.ModuleList()
+    #     fpn_convs = nn.ModuleList()
+    #
+    #     for i in range(self.num_levels):
+    #         # Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True, padding_mode='zeros')
+    #         #  lateral_conv = nn.Conv(self.in_channels[i], self.out_channels, 1)
+    #
+    #         lateral_conv = nn.Conv(self.out_channels, kernel_size=(1, 1))
+    #         # fpn_conv = nn.Sequential(
+    #         #     nn.Conv2d(self.out_channels, self.out_channels, 3, padding=1),
+    #         #     nn.BatchNorm2d(self.out_channels),
+    #         #     nn.ReLU())
+    #         fpn_conv = nn.Sequential(
+    #             nn.Conv2d(self.out_channels, self.out_channels, kernel_size=(3, 3), padding=((1, 1), (1, 1))),
+    #             nn.BatchNorm2d(self.out_channels),
+    #             nn.ReLU())
+    #         lateral_convs.append(lateral_conv)
+    #         fpn_convs.append(fpn_conv)
+    #
+    #     # Initialize weights
+    #     # for m in self.modules():
+    #     #     if isinstance(m, nn.Conv):
+    #     #         nn.init.xavier_uniform_(m.weight, gain=1)
+    #     #         if hasattr(m, 'bias'):
+    #     #             nn.init.constant_(m.bias, 0)
+    #     self.lateral_convs = lateral_convs
+    #     self.fpn_convs = fpn_convs
+
+    @nn.compact
+    def __call__(self, inputs):
+        #TODO: remove this hardcoded value after testing and use replace all "inp" w "inputs"
+        inp = [inputs]*3
+
+        # Inputs: resolution high -> low
+
+        assert isinstance(self.in_channels, tuple) #TODO: replace w below (should be list but its keeps converting my list to tuple)
+        # assert isinstance(self.in_channels, list)
+
+        assert len(self.in_channels) == len(inp)
+        #TODO: original appends to this lateral_convs which gets the module list... does this mean length can be greater than 3?
+        # if so, we my proposed rewriting (to be usable w flax may not work as intended...)
+       # lateral_convs = nn.ModuleList()
+       # fpn_convs = nn.ModuleList()
+
+
+        # ORIGINAL
+        # Initialize weights
+        # for m in self.modules():
+        #     if isinstance(m, nn.Conv):
+        #         nn.init.xavier_uniform_(m.weight, gain=1)
+        #         if hasattr(m, 'bias'):
+        #             nn.init.constant_(m.bias, 0)
+
+
+        # build laterals
+        laterals = []
+        for i in range(self.num_levels):
+            lateral = nn.Conv(self.out_channels, kernel_size=(1,1), bias_init=nn.initializers.zeros)(inp[i])
+            laterals.append(lateral)
+
+        #embed()
+
+        #TODO: write this part w equivalent interpolate function, jax's .map_coordinates only supports linear interp. also
+        # requires coordinate input f :(
+
+        # # Build top-down path
+        used_backbone_levels = len(laterals)
+        # for i in range(used_backbone_levels - 1, 0, -1):
+        #     laterals[i - 1] += F.interpolate(laterals[i], scale_factor=2, mode='nearest')
+
+        # Build output w laterals + fpn
+        out = []
+        for i in range(used_backbone_levels):
+            fpn = nn.Conv(self.out_channels, kernel_size=(1, 1), kernel_init=init.xavier_uniform(),
+                          bias_init=nn.initializers.zeros)(laterals[i])
+            fpn = nn.BatchNorm(self.out_channels)(fpn)
+            fpn = nn.relu(fpn)
+            out.append(fpn)
+        #embed()
+            # fpn_conv = nn.Sequential(
+            #         nn.Conv2d(self.out_channels, self.out_channels, 3, padding=1),
+            #         nn.BatchNorm2d(self.out_channels),
+            #         nn.ReLU())
+
+        # ORIGINAL
+        # out = [
+        #     self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)
+        # ]
+
+        return out
 
 key1, key2 = random.split(random.PRNGKey(0), 2)
 # x = random.uniform(key1, (15, 32, 32, 3))  # for AANet
@@ -273,13 +321,13 @@ key1, key2 = random.split(random.PRNGKey(0), 2)
 # feature_extractor = AANetFeature(feature_mdconv=(not False))
 # x = random.uniform(key1, (15, 3, 32, 32))  # for AANet
 # init_variables = feature_extractor.init(key2, x)
-#
-# max_disp = 200 // 3 # randomly picked
+
+max_disp = 200 // 3 # randomly picked
 
 key3, key4 = random.split(random.PRNGKey(0), 2)
 
-model = FeaturePyrmaid()
-x = random.uniform(key3, (15, 32, 32, 3))  # for AANet
+model = FeaturePyramidNetwork() #inchannels
+x = random.uniform(key3, (15, 3, 32, 32))  # for AANet
 init_pyramid = model.init(key4, x)
 
 from flax.core import freeze, unfreeze
