@@ -188,7 +188,7 @@ class AANetFeature(nn.Module):
         return [layer1, layer2, layer3]
 
 
-class FeaturePyrmaid(nn.Module):
+class FeaturePyramid(nn.Module):
     in_channel: int = 32
 
     @nn.compact
