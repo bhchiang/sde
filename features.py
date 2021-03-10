@@ -7,28 +7,22 @@ import numpy as onp
 import jax
 from IPython import embed
 import jax.nn.initializers as init
-import jax.scipy.ndimage as jscipy
 ModuleDef = Any
 
-#TODO: using the default scaling of 2 from jax initializer but is this what we rly want...
 kaiming_normal = partial(init.variance_scaling, 2.0, "fan_out", "truncated_normal")
 
 
 def dilated_conv3x3(x, features, strides=1, groups=1, dilation=1, name='dilated_conv3x3'):
     """3x3 convolution with padding"""
-
     d = max(1, dilation)
     return nn.Conv(features, kernel_size=(3, 3), strides=(strides,strides), padding=((dilation,dilation),(dilation,dilation)),
                    kernel_dilation=(d, d), feature_group_count=groups, use_bias=False, name=name)(x)
-    # return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-    #                  padding=dilation, groups=groups, bias=False, dilation=dilation)
 
 
 
 def conv1x1(features, stride=1):
     """1x1 convolution"""
     return nn.Conv(features=features, kernel_size=(1, 1), strides=(stride,stride), padding='VALID', use_bias=False)
-    # return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
 
 class Bottleneck(nn.Module):
@@ -86,7 +80,6 @@ class BasicBlock(nn.Module):
   # norm: Any = nn.BatchNorm
   strides: int = 1
   downsample: Any = None
-  #downsample: bool = False
   groups: int = 1
   base_width: int = 64
   dilation: int = 1
@@ -148,7 +141,6 @@ class AANetFeature(nn.Module):
         if stride != 1 or self.inplanes != planes * block.expansion:
             def downsample(x):
                 out = conv1x1(planes * block.expansion, stride)(x)
-                # embed()
                 out = self.norm_layer(use_running_average=False)(out)
                 return out
 
@@ -156,7 +148,7 @@ class AANetFeature(nn.Module):
         x = block(planes, stride, downsample, self.groups,
                             self.width_per_group, previous_dilation, self.norm_layer)(x)
 
-        #TODO: find work-around for this bc immutable
+        #TODO: find work-around for this bc immutable... do we use this tho
         #self.inplanes = planes * block.expansion
 
         for _ in range(1, blocks):
@@ -184,7 +176,6 @@ class AANetFeature(nn.Module):
         block = Bottleneck  # TODO: change this back to above
         layer3 = self.apply_layer(x, block, self.in_channels * 4, layers[2], stride=2)  # H/12
 
-
         return [layer1, layer2, layer3]
 
 
@@ -193,8 +184,8 @@ class FeaturePyramid(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        # x: [B, 32, H, W]
-        # out1 = [B, 64, H/2, W/2]
+        # x: [B, H, W, 32]
+        # out1 = [B, H/2, W/2, 64]
         out1 = nn.Conv(self.in_channel * 2, kernel_size=(3,3), strides=(2,2), padding=((1,1),(1,1)), use_bias=False)(x)
         out1 = nn.BatchNorm(self.in_channel * 2)(out1)
         out1 = nn.leaky_relu(out1, negative_slope=0.2)
@@ -202,7 +193,7 @@ class FeaturePyramid(nn.Module):
         out1 = nn.BatchNorm(self.in_channel * 2)(out1)
         out1 = nn.leaky_relu(out1, negative_slope=0.2)
 
-        # out2 = [B, 128, H/4, W/4]
+        # out2 = [B, H/4, W/4, 128]
         out2 = nn.Conv(self.in_channel * 4, kernel_size=(3,3), strides=(2,2), padding=((1,1), (1,1)), use_bias=False)(out1)
         out2 = nn.BatchNorm(self.in_channel * 4)(out2)
         out2 = nn.leaky_relu(out2, negative_slope=0.2)
@@ -220,41 +211,14 @@ class FeaturePyramidNetwork(nn.Module):
 
     # FPN paper uses 256 out channels by default
     def setup(self):
-        self.in_channels= [10]*3   # TODO: remove this hardcoded default value after testing and uncomment above TODO
+        self.in_channels= [32, 64, 128]   # TODO: remove this hardcoded default value after testing and uncomment above TODO
     #     assert isinstance(self.in_channels, list)
-    #     lateral_convs = nn.ModuleList()
-    #     # self.lateral_convs = nn.ModuleList()
-    #     fpn_convs = nn.ModuleList()
-    #
-    #     for i in range(self.num_levels):
-    #         # Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True, padding_mode='zeros')
-    #         #  lateral_conv = nn.Conv(self.in_channels[i], self.out_channels, 1)
-    #
-    #         lateral_conv = nn.Conv(self.out_channels, kernel_size=(1, 1))
-    #         # fpn_conv = nn.Sequential(
-    #         #     nn.Conv2d(self.out_channels, self.out_channels, 3, padding=1),
-    #         #     nn.BatchNorm2d(self.out_channels),
-    #         #     nn.ReLU())
-    #         fpn_conv = nn.Sequential(
-    #             nn.Conv2d(self.out_channels, self.out_channels, kernel_size=(3, 3), padding=((1, 1), (1, 1))),
-    #             nn.BatchNorm2d(self.out_channels),
-    #             nn.ReLU())
-    #         lateral_convs.append(lateral_conv)
-    #         fpn_convs.append(fpn_conv)
-    #
-    #     # Initialize weights
-    #     # for m in self.modules():
-    #     #     if isinstance(m, nn.Conv):
-    #     #         nn.init.xavier_uniform_(m.weight, gain=1)
-    #     #         if hasattr(m, 'bias'):
-    #     #             nn.init.constant_(m.bias, 0)
-    #     self.lateral_convs = lateral_convs
-    #     self.fpn_convs = fpn_convs
 
     @nn.compact
-    def __call__(self, inputs):
+    #TODO: currently testing w the 3 layers manually, in reality only 1 parameter: inputs
+    def __call__(self, in1, in2, in3):
         #TODO: remove this hardcoded value after testing and use replace all "inp" w "inputs"
-        inp = [inputs]*3
+        inp = [in1, in2, in3]
 
         # Inputs: resolution high -> low
 
@@ -262,55 +226,38 @@ class FeaturePyramidNetwork(nn.Module):
         # assert isinstance(self.in_channels, list)
 
         assert len(self.in_channels) == len(inp)
+
         #TODO: original appends to this lateral_convs which gets the module list... does this mean length can be greater than 3?
         # if so, we my proposed rewriting (to be usable w flax may not work as intended...)
        # lateral_convs = nn.ModuleList()
        # fpn_convs = nn.ModuleList()
 
-
-        # ORIGINAL
-        # Initialize weights
-        # for m in self.modules():
-        #     if isinstance(m, nn.Conv):
-        #         nn.init.xavier_uniform_(m.weight, gain=1)
-        #         if hasattr(m, 'bias'):
-        #             nn.init.constant_(m.bias, 0)
-
-
         # build laterals
         laterals = []
         for i in range(self.num_levels):
-            lateral = nn.Conv(self.out_channels, kernel_size=(1,1), bias_init=nn.initializers.zeros)(inp[i])
+            lateral = nn.Conv(self.out_channels, kernel_size=(1,1), kernel_init=init.xavier_uniform(),
+                          bias_init=nn.initializers.zeros)(inp[i])
             laterals.append(lateral)
 
         #embed()
 
-        #TODO: write this part w equivalent interpolate function, jax's .map_coordinates only supports linear interp. also
-        # requires coordinate input f :(
-
-        # # Build top-down path
+        # Build top-down path
         used_backbone_levels = len(laterals)
-        # for i in range(used_backbone_levels - 1, 0, -1):
-        #     laterals[i - 1] += F.interpolate(laterals[i], scale_factor=2, mode='nearest')
+        for i in range(used_backbone_levels - 1, 0, -1):
+            b, h, w, c = laterals[i].shape
+            laterals[i - 1] += jax.image.resize(laterals[i], shape=(b, h*2, w*2, c),
+                                                method=jax.image.ResizeMethod.NEAREST) # upscale by factor of 2
+                                 #F.interpolate(laterals[i], scale_factor=2, mode='nearest')
 
         # Build output w laterals + fpn
         out = []
         for i in range(used_backbone_levels):
-            fpn = nn.Conv(self.out_channels, kernel_size=(1, 1), kernel_init=init.xavier_uniform(),
+            fpn = nn.Conv(self.out_channels, kernel_size=(3, 3), padding=((1,1),(1,1)), kernel_init=init.xavier_uniform(),
                           bias_init=nn.initializers.zeros)(laterals[i])
             fpn = nn.BatchNorm(self.out_channels)(fpn)
             fpn = nn.relu(fpn)
             out.append(fpn)
-        #embed()
-            # fpn_conv = nn.Sequential(
-            #         nn.Conv2d(self.out_channels, self.out_channels, 3, padding=1),
-            #         nn.BatchNorm2d(self.out_channels),
-            #         nn.ReLU())
 
-        # ORIGINAL
-        # out = [
-        #     self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)
-        # ]
 
         return out
 
@@ -327,8 +274,11 @@ max_disp = 200 // 3 # randomly picked
 key3, key4 = random.split(random.PRNGKey(0), 2)
 
 model = FeaturePyramidNetwork() #inchannels
-x = random.uniform(key3, (15, 3, 32, 32))  # for AANet
-init_pyramid = model.init(key4, x)
+x = random.uniform(key3, (15, 128, 128, 3))  # for AANet
+x2 = random.uniform(key3, (15, 64,64,3))
+x3 = random.uniform(key3, (15, 32, 32,3))
+
+init_pyramid = model.init(key4, x,x2, x3)
 
 from flax.core import freeze, unfreeze
 
