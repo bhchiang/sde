@@ -50,7 +50,11 @@ class DeformableConv(nn.Module):
 
     @nn.compact
     def __call__(self, volume):
-        """volume represents correlation between two 3D cost volume of disparity candidates.
+        """volume represents correlation between two 3D cost volumes.
+
+        N x H x W x C
+        N is the batch size, H x W are the spatial dimensions, and C is the number of channels
+            = maximum disparity (D) representing the number of disparity candidates.
         """
         # Generate offsets
         offsets = nn.Conv(features=self.offset_num,
@@ -97,17 +101,39 @@ class DeformableConv(nn.Module):
                     _pixel_offset = (2, )
                     """
                     dy, dx = _pixel_offset
-                    return _volume[y + _y, x + _x]
+                    _rx, _ry = _y + dy, _x + dx
+                    x0, y0 = jnp.array((_rx, _ry), jnp.int32)
+                    x1, y1 = x0 + 1, y0 + 1
 
-                # embed()
+                    # Clip to the bounds of the input image
+                    y0, y1 = jnp.clip((y0, y1), a_min=0, a_max=in_h - 1)
+                    x0, x1 = jnp.clip((x0, x1), a_min=0, a_max=in_w - 1)
+
+                    # Get pixels
+                    p0 = _volume[y0, x0]
+                    p1 = _volume[y0, x1]
+                    p2 = _volume[y1, x0]
+                    p3 = _volume[y1, x1]
+
+                    # Do bilinear interpolation for each one (could be vectorized)
+                    w0 = (y1 - _ry) * (x1 - _rx)  # y0, x0
+                    w1 = (y1 - y) * (_rx - x0)  # y0, x1
+                    w2 = (_ry - y0) * (x1 - _rx)  # y1, x0
+                    w3 = (_ry - y0) * (_rx - x0)  # y1, x1
+
+                    return jnp.sum(
+                        jnp.array([p0 * w0, p1 * w1, p2 * w2, p3 * w3]))
+
                 _kernel_offsets = jnp.reshape(
                     _kernel_offsets, (self.filter_h, self.filter_w, 2))
+                # embed()
+                # _pixel(kernel_vs[0, 0], kernel_us[0, 0], _kernel_offsets[0, 0])
                 return jax.vmap(jax.vmap(_pixel))(kernel_vs, kernel_us,
                                                   _kernel_offsets)
 
+            # embed()
             # _retrieve(vs[10, 0], us[10, 0], _offsets[10, 0])
             pixels = jax.vmap(jax.vmap(_retrieve))(vs, us, _image_offsets)
-            # embed()
             return pixels
 
         _volume = volume[0]
