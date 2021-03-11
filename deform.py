@@ -1,6 +1,8 @@
+import time
 from typing import Tuple, Union
 
 import jax
+import jax.profiler
 from flax import linen as nn
 from IPython import embed
 from jax import numpy as jnp
@@ -48,6 +50,13 @@ class DeformableConv(nn.Module):
 
         self.stride_y, self.stride_x = self.strides
 
+        # Kernel indices
+        kernel_ys = jnp.arange(-self.dilated_pad_y, self.dilated_pad_y + 1,
+                               self.dilation_y)
+        kernel_xs = jnp.arange(-self.dilated_pad_x, self.dilated_pad_x + 1,
+                               self.dilation_x)
+        self.kernel_us, self.kernel_vs = jnp.meshgrid(kernel_xs, kernel_ys)
+
     @nn.compact
     def __call__(self, volume):
         """volume represents correlation between two 3D cost volumes.
@@ -77,16 +86,9 @@ class DeformableConv(nn.Module):
                         self.stride_y)
         xs = jnp.arange(self.dilated_pad_x, in_w - self.dilated_pad_x,
                         self.stride_x)
-        assert len(ys) == out_h
-        assert len(xs) == out_w
+        # assert len(ys) == out_h
+        # assert len(xs) == out_w
         us, vs = jnp.meshgrid(xs, ys)
-
-        # Kernel indices
-        kernel_ys = jnp.arange(-self.dilated_pad_y, self.dilated_pad_y + 1,
-                               self.dilation_y)
-        kernel_xs = jnp.arange(-self.dilated_pad_x, self.dilated_pad_x + 1,
-                               self.dilation_x)
-        kernel_us, kernel_vs = jnp.meshgrid(kernel_xs, kernel_ys)
 
         def _wrap(_volume, _image_offsets):
             """
@@ -134,12 +136,13 @@ class DeformableConv(nn.Module):
                     _kernel_offsets, (self.filter_h, self.filter_w, 2))
 
                 # embed()
-                _pixel(kernel_vs[0, 0], kernel_us[0, 0], _kernel_offsets[0, 0])
-                return jax.vmap(jax.vmap(_pixel))(kernel_vs, kernel_us,
+                # _pixel(kernel_vs[0, 0], kernel_us[0, 0], _kernel_offsets[0, 0])
+                return jax.vmap(jax.vmap(_pixel))(self.kernel_vs,
+                                                  self.kernel_us,
                                                   _kernel_offsets)
 
             # embed()
-            _retrieve(vs[10, 0], us[10, 0], _image_offsets[10, 0])
+            # _retrieve(vs[10, 0], us[10, 0], _image_offsets[10, 0])
             pixels = jax.vmap(jax.vmap(_retrieve))(vs, us, _image_offsets)
             return pixels
 
@@ -175,7 +178,7 @@ class DeformableConv(nn.Module):
         # We need to repeat each set of offset pixels by the size of each deformable group (features_per_group).
 
         features_per_group = self.filters // self.num_deform_groups
-        # _pixels[batch, y, x, group_num, :] will now be of length features_per_group
+        # _pixels[batch, y, x, group_num, :] will now be of length features_per_group * channel_in
         _pixels = jnp.tile(_pixels, (1, 1, 1, 1, features_per_group))
 
         # Flatten the last axis
@@ -190,15 +193,15 @@ class DeformableConv(nn.Module):
                       feature_group_count=channel_in,
                       strides=(self.filter_h, self.filter_w),
                       padding=self.padding)(_pixels)
-        out = out.reshape(
-            (batch_size, out_h, out_w, channel_in, self.filters)).transpose(
-                (0, 1, 2, 4, 3))
+        out = out.reshape((batch_size, out_h, out_w, self.filters, channel_in))
         out = jnp.sum(out, axis=-1)
         return out
         # embed()
 
 
 if __name__ == "__main__":
+    server = jax.profiler.start_server(9999)
+    print("Starting profiling server...")
     x_k, m_k = jax.random.split(jax.random.PRNGKey(0), 2)
     # N x H x W x C
     # C = D (maximum disparity)
@@ -210,10 +213,13 @@ if __name__ == "__main__":
                            kernel_dilation=(4, 2))
     variables = model.init(m_k, x)
 
-    @jax.jit
+    # @jax.jit
     def apply(variables, x):
         y = model.apply(variables, x)
         return y
 
+    time.sleep(5)
+    print("Starting")
+    time.sleep(5)
     y = apply(variables, x)
-    embed()
+    # embed()
