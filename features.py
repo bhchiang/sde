@@ -7,6 +7,7 @@ import numpy as onp
 import jax
 from IPython import embed
 import jax.nn.initializers as init
+import cost
 
 ModuleDef = Any
 
@@ -87,8 +88,7 @@ class Bottleneck(nn.Module):
         out = nn.relu(out)
 
         #3
-        out = conv1x1(self.features * self.expansion)(
-            out)  # ie self.features * 4
+        out = conv1x1(self.features * self.expansion)(out)  # ie self.features * 4
         out = self.norm_layer2(out)  # self.features * self.expansion
 
         if self.downsample:
@@ -170,7 +170,6 @@ class AANetFeature(nn.Module):
             stride = 1
 
         if stride != 1 or self.inplanes != planes * block.expansion:
-
             def downsample(x):
                 out = conv1x1(planes * block.expansion, stride)(x)
                 out = self.norm_layer(use_running_average=False)(out)
@@ -192,7 +191,7 @@ class AANetFeature(nn.Module):
         return x
 
     @nn.compact
-    def __call__(self, x):  # TODO: call
+    def __call__(self, x):
         stride = 3
 
         x = nn.Conv(self.inplanes,
@@ -210,7 +209,7 @@ class AANetFeature(nn.Module):
 
         layer1 = self.apply_layer(x, Bottleneck, self.in_channels,
                                   layers[0])  # H/3
-        layer2 = self.apply_layer(x,
+        layer2 = self.apply_layer(layer1,
                                   Bottleneck,
                                   self.in_channels * 2,
                                   layers[1],
@@ -218,7 +217,8 @@ class AANetFeature(nn.Module):
 
         #block = DeformBottleneck if self.feature_mdconv else Bottleneck
         block = Bottleneck  # TODO: change this back to above
-        layer3 = self.apply_layer(x,
+       # embed()
+        layer3 = self.apply_layer(layer2,
                                   block,
                                   self.in_channels * 4,
                                   layers[2],
@@ -234,6 +234,7 @@ class FeaturePyramid(nn.Module):
     def __call__(self, x):
         # x: [B, H, W, 32]
         # out1 = [B, H/2, W/2, 64]
+
         out1 = nn.Conv(self.in_channel * 2,
                        kernel_size=(3, 3),
                        strides=(2, 2),
@@ -274,22 +275,21 @@ class FeaturePyramidNetwork(nn.Module):
     num_levels: int = 3
 
     # FPN paper uses 256 out channels by default
-    def setup(self):
-        self.in_channels = [
-            32, 64, 128
-        ]  # TODO: remove this hardcoded default value after testing and uncomment above TODO
+    # def setup(self):
+    #     self.in_channels = [
+    #         32, 64, 128
+    #     ]  # TODO: remove this hardcoded default value after testing and uncomment above TODO
 
 
     @nn.compact
     #TODO: currently testing w the 3 layers manually, in reality only 1 parameter: inputs
     def __call__(self, inputs):
         # Inputs: resolution high -> low
-
-        assert isinstance(self.in_channels, tuple)
+        #assert isinstance(self.in_channels, tuple)
                  #TODO: replace w below (should be list but its keeps converting my list to tuple)
         # assert isinstance(self.in_channels, list)
 
-        assert len(self.in_channels) == len(inputs)
+        #assert len(self.in_channels) == len(inputs)
 
         #TODO: original appends to this lateral_convs which gets the module list... does this mean length can be greater than 3?
         # if so, we my proposed rewriting (to be usable w flax may not work as intended...)
@@ -329,31 +329,45 @@ class FeaturePyramidNetwork(nn.Module):
         return out
 
 
-# key1, key2 = random.split(random.PRNGKey(0), 2)
-# x = random.uniform(key1, (15, 32, 32, 3))  # for AANet
-# init_variables = model.init(key2, x)
-#
-# feature_extractor = AANetFeature(feature_mdconv=(not False))
-# x = random.uniform(key1, (15, 3, 32, 32))  # for AANet
-# init_variables = feature_extractor.init(key2, x)
+key1, key2 = random.split(random.PRNGKey(0), 2)
+x = random.uniform(key1, (15, 96, 96, 3))  # for AANet
+feature_extractor = AANetFeature(feature_mdconv=(not False))
+init_features = feature_extractor.init(key2, x)
+@jax.jit
+def apply_feature(variables, _x):
+    return feature_extractor.apply(variables, _x, mutable=['batch_stats'])
 
-max_disp = 200 // 3  # randomly picked
+feature, modified_vars = apply_feature(init_features, x)
+
+print("done w feature extraction")
 
 key3, key4 = random.split(random.PRNGKey(0), 2)
 
 model = FeaturePyramidNetwork()  #inchannels
-x = random.uniform(key3, (15, 128, 128, 3))  # for AANet
-x2 = random.uniform(key3, (15, 64, 64, 3))
-x3 = random.uniform(key3, (15, 32, 32, 3))
-
-init_pyramid = model.init(key4, [x, x2, x3])
+x = random.uniform(key3, (15, 32, 32, 128))  # 128,128
+x2 = random.uniform(key3, (15, 16, 16, 256))
+x3 = random.uniform(key3, (15, 8, 8, 512))
+#[x, x2, x3]
+init_pyramid = model.init(key4, feature)
 
 # Testing in jitted context
 @jax.jit
 def apply(variables, _x):
     return model.apply(variables, _x)
 
-output = apply(init_pyramid, [x,x2,x3])
+features_pyramid = apply(init_pyramid, feature)
+print("done with feature pyramids")
+
+key1, key2 = random.split(random.PRNGKey(0), 2)
+costModel = cost.CostVolumePyramid(10) #random max disp=10
+init_cost = costModel.init(key2, features_pyramid, features_pyramid)
+
+@jax.jit
+def apply_cost(variables, left_feature, right_feature):
+    return costModel.apply(variables, left_feature, right_feature) # left feature, right feature
+
+cost_output = apply_cost(init_cost, features_pyramid, features_pyramid)
+print("done w cost pyramid")
 
 from flax.core import freeze, unfreeze
 
