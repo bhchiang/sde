@@ -7,6 +7,7 @@ import numpy as onp
 import jax
 from IPython import embed
 import jax.nn.initializers as init
+
 ModuleDef = Any
 
 kaiming_normal = partial(init.variance_scaling, 2.0, "fan_out",
@@ -278,22 +279,17 @@ class FeaturePyramidNetwork(nn.Module):
             32, 64, 128
         ]  # TODO: remove this hardcoded default value after testing and uncomment above TODO
 
-    #     assert isinstance(self.in_channels, list)
 
     @nn.compact
     #TODO: currently testing w the 3 layers manually, in reality only 1 parameter: inputs
-    def __call__(self, in1, in2, in3):
-        #TODO: remove this hardcoded value after testing and use replace all "inp" w "inputs"
-        inp = [in1, in2, in3]
-
+    def __call__(self, inputs):
         # Inputs: resolution high -> low
 
-        assert isinstance(
-            self.in_channels, tuple
-        )  #TODO: replace w below (should be list but its keeps converting my list to tuple)
+        assert isinstance(self.in_channels, tuple)
+                 #TODO: replace w below (should be list but its keeps converting my list to tuple)
         # assert isinstance(self.in_channels, list)
 
-        assert len(self.in_channels) == len(inp)
+        assert len(self.in_channels) == len(inputs)
 
         #TODO: original appends to this lateral_convs which gets the module list... does this mean length can be greater than 3?
         # if so, we my proposed rewriting (to be usable w flax may not work as intended...)
@@ -306,21 +302,17 @@ class FeaturePyramidNetwork(nn.Module):
             lateral = nn.Conv(self.out_channels,
                               kernel_size=(1, 1),
                               kernel_init=init.xavier_uniform(),
-                              bias_init=nn.initializers.zeros)(inp[i])
+                              bias_init=nn.initializers.zeros)(inputs[i])#(inp[i])
             laterals.append(lateral)
 
-        #embed()
 
         # Build top-down path
         used_backbone_levels = len(laterals)
         for i in range(used_backbone_levels - 1, 0, -1):
             b, h, w, c = laterals[i].shape
-            laterals[i -
-                     1] += jax.image.resize(laterals[i],
-                                            shape=(b, h * 2, w * 2, c),
-                                            method=jax.image.ResizeMethod.
-                                            NEAREST)  # upscale by factor of 2
-            #F.interpolate(laterals[i], scale_factor=2, mode='nearest')
+            laterals[i -1] += jax.image.resize(laterals[i], shape=(b, h * 2, w * 2, c),
+                                               method=jax.image.ResizeMethod.NEAREST)  # upscale by factor of 2
+
 
         # Build output w laterals + fpn
         out = []
@@ -337,7 +329,7 @@ class FeaturePyramidNetwork(nn.Module):
         return out
 
 
-key1, key2 = random.split(random.PRNGKey(0), 2)
+# key1, key2 = random.split(random.PRNGKey(0), 2)
 # x = random.uniform(key1, (15, 32, 32, 3))  # for AANet
 # init_variables = model.init(key2, x)
 #
@@ -354,16 +346,17 @@ x = random.uniform(key3, (15, 128, 128, 3))  # for AANet
 x2 = random.uniform(key3, (15, 64, 64, 3))
 x3 = random.uniform(key3, (15, 32, 32, 3))
 
-init_pyramid = model.init(key4, x, x2, x3)
-
+init_pyramid = model.init(key4, [x, x2, x3])
 
 # Testing in jitted context
 @jax.jit
 def apply(variables, _x):
-    return model.apply(variables, x)
+    return model.apply(variables, _x)
 
+output = apply(init_pyramid, [x,x2,x3])
 
 from flax.core import freeze, unfreeze
 
 print('initialized parameter shapes:\n',
       jax.tree_map(jnp.shape, unfreeze(init_pyramid)))
+
