@@ -6,7 +6,7 @@ import numpy as onp
 import jax
 import jax.ops as ops
 from IPython import embed
-import features
+# import features
 
 
 class CostVolume(nn.Module):
@@ -60,30 +60,30 @@ class CostVolumePyramid(nn.Module):
 
 # test cost volume and cost vol pyramid
 # 1) init and apply model FeaturePyramidNetwork()
-key3, key4 = random.split(random.PRNGKey(0), 2)
-model = features.FeaturePyramidNetwork()  #inchannels
-x = random.uniform(key3, (15, 128, 128, 3))  # for AANet
-x2 = random.uniform(key3, (15, 64, 64, 3))
-x3 = random.uniform(key3, (15, 32, 32, 3))
-init_pyramid = model.init(key4, [x, x2, x3])
-print("finished getting features")
-
-@jax.jit
-def apply_feature(variables, _x):
-    return model.apply(variables, _x)
-
-feature_pyr = apply_feature(init_pyramid, [x,x2,x3])
-
+# key3, key4 = random.split(random.PRNGKey(0), 2)
+# model = features.FeaturePyramidNetwork()  #inchannels
+# x = random.uniform(key3, (15, 128, 128, 3))  # for AANet
+# x2 = random.uniform(key3, (15, 64, 64, 3))
+# x3 = random.uniform(key3, (15, 32, 32, 3))
+# init_pyramid = model.init(key4, [x, x2, x3])
+# print("finished getting features")
+#
+# @jax.jit
+# def apply_feature(variables, _x):
+#     return model.apply(variables, _x)
+#
+# feature_pyr = apply_feature(init_pyramid, [x,x2,x3])
+#
 
 # 2) Use features as input to cost volume pyramid
 # pretending left and right features are same for simplicity
-key1, key2 = random.split(random.PRNGKey(0), 2)
-costModel = CostVolumePyramid(10) #random max disp=10
-init_cost = costModel.init(key2, feature_pyr, feature_pyr)
-
-@jax.jit
-def apply_cost(variables, left_feature, right_feature):
-    return costModel.apply(variables, left_feature, right_feature) # left feature, right feature
-
-cost_output = apply_cost(init_cost, feature_pyr, feature_pyr)
-print("finished cost pyramid")
+# key1, key2 = random.split(random.PRNGKey(0), 2)
+# costModel = CostVolumePyramid(10) #random max disp=10
+# init_cost = costModel.init(key2, feature_pyr, feature_pyr)
+#
+# @jax.jit
+# def apply_cost(variables, left_feature, right_feature):
+#     return costModel.apply(variables, left_feature, right_feature) # left feature, right feature
+#
+# cost_output = apply_cost(init_cost, feature_pyr, feature_pyr)
+# print("finished cost pyramid")
