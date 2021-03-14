@@ -201,7 +201,7 @@ class DeformableConv(nn.Module):
 
 if __name__ == "__main__":
     server = jax.profiler.start_server(9999)
-    print("Starting profiling server...")
+    print("Starting profiling server")
     x_k, m_k = jax.random.split(jax.random.PRNGKey(0), 2)
     # N x H x W x C
     # C = D (maximum disparity)
