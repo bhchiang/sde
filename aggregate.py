@@ -56,7 +56,7 @@ class _AdapativeAggregation(nn.Module):
     max_disp: int
     num_blocks: int = 1
 
-    num_deform_groups: int = 2
+    num_deform_groups: int = 1
     md_conv_dilation: int = 2
 
     @nn.compact
@@ -84,7 +84,7 @@ class _AdapativeAggregation(nn.Module):
             b, h, w, c = _csa.shape
             for j in range(self.num_scales):
                 _isa = isa[j]
-                print(f"j = {j}, _isa.shape = {_isa.shape}")
+                # print(f"j = {j}, _isa.shape = {_isa.shape}")
                 if i == j:
                     continue
                 elif i < j:
@@ -112,7 +112,7 @@ class _AdapativeAggregation(nn.Module):
                                    use_bias=False)(_isa)
                     _isa = nn.BatchNorm(use_running_average=False)(_isa)
                 _csa += _isa
-            print(f"_csa.shape = {_csa.shape}")
+            # print(f"_csa.shape = {_csa.shape}")
             csa.append(_csa)
         return csa
 
