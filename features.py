@@ -7,7 +7,7 @@ import numpy as onp
 import jax
 from IPython import embed
 import jax.nn.initializers as init
-import cost
+#import cost
 
 ModuleDef = Any
 
@@ -333,52 +333,137 @@ class FeaturePyramidNetwork(nn.Module):
         return out
 
 
+def conv5x5(x, out_channels, stride=2, dilation=1, use_bn=True):
+    bias = False if use_bn else True
+    conv = nn.Conv(out_channels, kernel_size=(5,5), strides=(stride,stride), padding=((2,2),(2,2)),
+                   kernel_dilation=(dilation,dilation), use_bias=bias)
+    if use_bn:
+        out = conv(x)
+        out = nn.BatchNorm(use_running_average=False)(out)
+        out = nn.relu(out)
+    else:
+        out = conv(x)
+        out = nn.relu(out)
+    return out
+
+def convbn(x, out_planes, kernel_size, stride, pad, dilation):
+    padding = dilation if dilation > 1 else pad
+    # embed()
+    out = nn.Conv(out_planes, kernel_size=(kernel_size,kernel_size), strides=(stride,stride),
+                                   padding=((padding, padding),(padding,padding)),
+                                    kernel_dilation=(dilation, dilation), use_bias=False)(x)
+    out = nn.BatchNorm(out_planes)(out)
+    return out
+
+class PSMNetBasicBlock(nn.Module):
+    expansion = 1
+    planes: int
+    stride: int
+    pad: int
+    dilation: int
+    downsample: ModuleDef = None
+
+
+    @nn.compact
+    def __call__(self, x):
+        out = convbn(x, self.planes, 3, self.stride, self.pad, self.dilation)
+        out = nn.relu(out)
+        # embed()
+        #conv 2
+        out = convbn(out, self.planes, 3, 1, self.pad, self.dilation)
+
+        if self.downsample is not None:
+            #embed()
+            x = self.downsample(x)
+
+        out += x
+
+        return out
+
+class GCNetFeature(nn.Module):
+
+    def apply_layer(self, x, block, planes, blocks, stride, pad, dilation):
+        downsample = None
+        if stride != 1: # or self.inplanes != planes * block.expansion:
+            def downsample(x):
+                out = nn.Conv(planes * block.expansion,
+                          kernel_size=(1,1), strides=(stride,stride), use_bias=False)(x)
+
+                out = nn.BatchNorm(planes * block.expansion)(out)
+                return out
+        # layers = []
+
+        x = block(planes, stride,  pad,  dilation, downsample)(x)
+
+              #self.inplanes = planes * block.expansion
+        for i in range(1, blocks):
+            x = block(planes, 1, pad, dilation,None)(x)
+
+        return x
+        # return nn.Sequential(*layers)
+
+    @nn.compact
+    def __call__(self, x):
+        out = conv5x5(x, 32)
+        out = self.apply_layer(out, PSMNetBasicBlock,32, 8, 1, 1, 1)
+        out = dilated_conv3x3(out, 32)  # [32, H/2, W/2]
+        embed()
+        return out
+
+
 if __name__ == "__main__":
     key1, key2 = random.split(random.PRNGKey(0), 2)
-    x = random.uniform(key1, (15, 96, 96, 3))  # for AANet
-    feature_extractor = AANetFeature(feature_mdconv=(not False))
-    init_features = feature_extractor.init(key2, x)
+    x = random.uniform(key1, (15, 48, 48, 8))  # for AANet
+    print("here!")
+    model = GCNetFeature()  #  8, 1, 1, 1 -> random input to PSMnet or whatever
+    init_PSM = model.init(key2, x)
 
-    @jax.jit
-    def apply_feature(variables, _x):
-        return feature_extractor.apply(variables, _x, mutable=['batch_stats'])
+    print("done w PSMNet!")
 
-    feature, modified_vars = apply_feature(init_features, x)
+    # feature_extractor = AANetFeature(feature_mdconv=(not False))
+    # init_features = feature_extractor.init(key2, x)
 
-    print("done w feature extraction")
+    # @jax.jit
+    # def apply_feature(variables, _x):
+    #     return feature_extractor.apply(variables, _x, mutable=['batch_stats'])
+    #
+    # feature, modified_vars = apply_feature(init_features, x)
+    #
+    # print("done w feature extraction")
+    #
+    # key3, key4 = random.split(random.PRNGKey(0), 2)
 
-    key3, key4 = random.split(random.PRNGKey(0), 2)
-
-    model = FeaturePyramidNetwork()  #inchannels
-    x = random.uniform(key3, (15, 32, 32, 128))  # 128,128
-    x2 = random.uniform(key3, (15, 16, 16, 256))
-    x3 = random.uniform(key3, (15, 8, 8, 512))
+    # model = FeaturePyramidNetwork()  #inchannels
+    # x = random.uniform(key3, (15, 32, 32, 128))  # 128,128
+    # x2 = random.uniform(key3, (15, 16, 16, 256))
+    # x3 = random.uniform(key3, (15, 8, 8, 512))
     #[x, x2, x3]
-    init_pyramid = model.init(key4, feature)
+    # init_pyramid = model.init(key4, feature)
 
     # Testing in jitted context
-    @jax.jit
-    def apply(variables, _x):
-        return model.apply(variables, _x)
+    # @jax.jit
+    # def apply(variables, _x):
+    #     return model.apply(variables, _x)
+    #
+    # features_pyramid = apply(init_pyramid, feature)
+    # print("done with feature pyramids")
+    #
+    # key1, key2 = random.split(random.PRNGKey(0), 2)
+    # costModel = cost.CostVolumePyramid(10)  #random max disp=10
+    # init_cost = costModel.init(key2, features_pyramid, features_pyramid)
+    #
+    # @jax.jit
+    # def apply_cost(variables, left_feature, right_feature):
+    #     return costModel.apply(variables, left_feature,
+    #                            right_feature)  # left feature, right feature
+    #
+    # cost_output = apply_cost(init_cost, features_pyramid, features_pyramid)
+    # print("done w cost pyramid")
+    #
+    # from flax.core import freeze, unfreeze
+    #
+    # print('initialized parameter shapes:\n',
+    #       jax.tree_map(jnp.shape, unfreeze(init_pyramid)))
+    #
+    # embed()
 
-    features_pyramid = apply(init_pyramid, feature)
-    print("done with feature pyramids")
-
-    key1, key2 = random.split(random.PRNGKey(0), 2)
-    costModel = cost.CostVolumePyramid(10)  #random max disp=10
-    init_cost = costModel.init(key2, features_pyramid, features_pyramid)
-
-    @jax.jit
-    def apply_cost(variables, left_feature, right_feature):
-        return costModel.apply(variables, left_feature,
-                               right_feature)  # left feature, right feature
-
-    cost_output = apply_cost(init_cost, features_pyramid, features_pyramid)
-    print("done w cost pyramid")
-
-    from flax.core import freeze, unfreeze
-
-    print('initialized parameter shapes:\n',
-          jax.tree_map(jnp.shape, unfreeze(init_pyramid)))
-
-    embed()
