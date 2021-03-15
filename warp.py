@@ -3,6 +3,7 @@
 import jax
 import jax.numpy as jnp
 
+
 def normalize_coords(grid):
     """Normalize coordinates of image scale to [-1, 1]
     Args:
@@ -10,12 +11,14 @@ def normalize_coords(grid):
     """
 
     #OURS: [B, H, W, 2]
-    assert grid.shapep[3] == 2
+    assert grid.shape[-1] == 2
     h, w = grid.shape[1:3]
-    grid[:, :,:,0] = 2*(grid[:,:,:,0].copy()/(w-1)) - 1 # x: [-1,1]
+    grid = grid.at[:, :, :,
+                   0].set(2 * (grid[:, :, :, 0] / (w - 1)) - 1)  # x: [-1,1]
     #grid[:, 0, :, :] = 2 * (grid[:, 0, :, :].clone() / (w - 1)) - 1  # x: [-1, 1]
-    grid[:,:,:,1] = 2 * (grid[:, :, :,1].copy() / (h - 1)) - 1  # y: [-1, 1]
-   # grid[:, 1, :, :] = 2 * (grid[:, 1, :, :].clone() / (h - 1)) - 1  # y: [-1, 1]
+    grid = grid.at[:, :, :,
+                   1].set(2 * (grid[:, :, :, 1] / (h - 1)) - 1)  # y: [-1, 1]
+    # grid[:, 1, :, :] = 2 * (grid[:, 1, :, :].clone() / (h - 1)) - 1  # y: [-1, 1]
     #grid = grid.permute((0, 2, 3, 1))  # [B, H, W, 2]
     return grid
 
@@ -31,18 +34,28 @@ def meshgrid(img, homogeneous=False):
     b, h, w, _ = img.shape  #b, _, h, w = img.size()
 
     #TODO: make this ~ jaxy ~; nvm
-    x_range = jnp.arange(w).reshape(1,w,1)#torch.arange(0, w).view(1, 1, w).expand(1, h, w).type_as(img)  # [1, H, W]
-    x_range = jnp.repeat(x_range,h, axis=0)
-    y_range = jnp.arange(h).reshape(h,1,1)#torch.arange(0, h).view(1, h, 1).expand(1, h, w).type_as(img)
+    x_range = jnp.arange(w).reshape(
+        1, w, 1
+    )  #torch.arange(0, w).view(1, 1, w).expand(1, h, w).type_as(img)  # [1, H, W]
+    x_range = jnp.repeat(x_range, h, axis=0)
+    y_range = jnp.arange(h).reshape(
+        h, 1,
+        1)  #torch.arange(0, h).view(1, h, 1).expand(1, h, w).type_as(img)
     y_range = jnp.repeat(y_range, w, axis=1)
 
-    grid = jnp.concatenate([x_range, y_range], axis=2)  #torch.cat((x_range, y_range), dim=0) [2, H, W], grid[:, i, j] = [j, i]
-    grid = jnp.expand_dims(grid, axis=0)# grid.unsqueeze(0)
+    grid = jnp.concatenate(
+        [x_range, y_range], axis=2
+    )  #torch.cat((x_range, y_range), dim=0) [2, H, W], grid[:, i, j] = [j, i]
+    grid = jnp.expand_dims(grid, axis=0)  # grid.unsqueeze(0)
     grid = jnp.repeat(grid, b, axis=0)  # .expand(b, 2, h, w)  [B, 2, H, W]
 
     if homogeneous:
-        ones = jnp.ones((b,h,w,1))   #torch.ones_like(x_range).unsqueeze(0).expand(b, 1, h, w)  # [B, 1, H, W]
-        grid = jnp.concatenate([grid, ones], axis=3) #torch.cat((grid, ones), dim=1)  # [B, 3, H, W]
+        ones = jnp.ones(
+            (b, h, w, 1)
+        )  #torch.ones_like(x_range).unsqueeze(0).expand(b, 1, h, w)  # [B, 1, H, W]
+        grid = jnp.concatenate(
+            [grid, ones],
+            axis=3)  #torch.cat((grid, ones), dim=1)  # [B, 3, H, W]
         assert grid.shape[3] == 3
     return grid
 
@@ -57,15 +70,26 @@ def disp_warp(img, disp, padding_mode='border'):
         warped_img: [B, 3, H, W]
         valid_mask: [B, 3, H, W]
     """
-    assert disp.min() >= 0
+    # assert disp.min() >= 0
 
     grid = meshgrid(img)  # [B, 2, H, W] in image scale
     # Note that -disp here
-    B, H , W, _ = disp.shape
-    offset = jnp.concatenate([-disp, jnp.zeros((B, H, W, 1))], axis=3)#torch.cat((-disp, torch.zeros_like(disp)), dim=1)  # [B, 2, H, W]
+    B, H, W, _ = disp.shape
+    offset = jnp.concatenate(
+        [-disp, jnp.zeros((B, H, W, 1))], axis=3
+    )  #torch.cat((-disp, torch.zeros_like(disp)), dim=1)  # [B, 2, H, W]
     sample_grid = grid + offset
     sample_grid = normalize_coords(sample_grid)  # [B, H, W, 2] in [-1, 1]
-    warped_img = bilinear_sampler(img, sample_grid) #TODO: UH,,, F... #F.grid_sample(img, sample_grid, mode='bilinear', padding_mode=padding_mode)
+    print("sample grid", sample_grid.max(), sample_grid.min())
+    y = sample_grid[..., 0]
+    x = sample_grid[..., 1]
+    print(y.shape, x.shape)
+    warped_img = bilinear_sampler(
+        img, x, y
+    )  #TODO: UH,,, F... #F.grid_sample(img, sample_grid, mode='bilinear', padding_mode=padding_mode)
+    print(img.max(), img.min())
+    print(warped_img.max(), warped_img.min())
+    print(warped_img.shape)
     #
     valid_mask = None
     #TODO: is this mask used ?! the fuck
@@ -75,8 +99,10 @@ def disp_warp(img, disp, padding_mode='border'):
     # valid_mask[valid_mask > 0] = 1
     return warped_img, valid_mask
 
+
 #################### TODO: CODE BELOW CONVERTED FROM TENSORFLOW IMPLEMENTATION... not sure what jax equivalent of
 #TODO: F.grid_sample is... below code from: https://github.com/kevinzakka/spatial-transformer-network/blob/master/stn/transformer.py#L159
+
 
 def bilinear_sampler(img, x, y):
     """
@@ -96,27 +122,27 @@ def bilinear_sampler(img, x, y):
     """
     H = img.shape[1]
     W = img.shape[2]
-    max_y = (H - 1).astype( 'int32')
-    max_x = (W - 1).astype('int32')
-    zero = 0 #?? jnp.zeros([], dtype='int32')
+    max_y = jnp.int32(H - 1)
+    max_x = jnp.int32(W - 1)
+    zero = 0  #?? jnp.zeros([], dtype='int32')
 
     # rescale x and y to [0, W-1/H-1]
     x = x.astype('float32')
-    y = y.astype( 'float32')
-    x = 0.5 * ((x + 1.0) * (max_x-1).astype('float32'))
-    y = 0.5 * ((y + 1.0) * (max_y-1).astype('float32'))
+    y = y.astype('float32')
+    x = 0.5 * ((x + 1.0) * (max_x - 1).astype('float32'))
+    y = 0.5 * ((y + 1.0) * (max_y - 1).astype('float32'))
 
     # grab 4 nearest corner points for each (x_i, y_i)
-    x0 = jnp.floor(x).astype( 'int32')
+    x0 = jnp.floor(x).astype('int32')
     x1 = x0 + 1
-    y0 = jnp.floor(y).astype( 'int32')
+    y0 = jnp.floor(y).astype('int32')
     y1 = y0 + 1
 
     # clip to range [0, H-1/W-1] to not violate img boundaries
-    x0 = jnp.clip(x0, 0, max_x)#clip_by_value(x0, zero, max_x)
-    x1 = jnp.clip(x1, 0, max_x)#tf.clip_by_value(x1, zero, max_x)
-    y0 = jnp.clip(y0, 0, max_y) #tf.clip_by_value(y0, zero, max_y)
-    y1 = jnp.clip(y1, 0, max_y) #tf.clip_by_value(y1, zero, max_y)
+    x0 = jnp.clip(x0, 0, max_x)  #clip_by_value(x0, zero, max_x)
+    x1 = jnp.clip(x1, 0, max_x)  #tf.clip_by_value(x1, zero, max_x)
+    y0 = jnp.clip(y0, 0, max_y)  #tf.clip_by_value(y0, zero, max_y)
+    y1 = jnp.clip(y1, 0, max_y)  #tf.clip_by_value(y1, zero, max_y)
 
     # get pixel value at corner coords
     Ia = get_pixel_value(img, x0, y0)
@@ -125,16 +151,17 @@ def bilinear_sampler(img, x, y):
     Id = get_pixel_value(img, x1, y1)
 
     # recast as float for delta calculation
-    x0 = x0.astype( 'float32')
-    x1 = x1.astype( 'float32')
-    y0 = y0.astype( 'float32')
-    y1 = y1.astype( 'float32')
+    x0 = x0.astype('float32')
+    x1 = x1.astype('float32')
+    y0 = y0.astype('float32')
+    y1 = y1.astype('float32')
 
     # calculate deltas
-    wa = (x1-x) * (y1-y)
-    wb = (x1-x) * (y-y0)
-    wc = (x-x0) * (y1-y)
-    wd = (x-x0) * (y-y0)
+    wa = (x1 - x) * (y1 - y)
+    wb = (x1 - x) * (y - y0)
+    wc = (x - x0) * (y1 - y)
+    wd = (x - x0) * (y - y0)
+    print(wa.max(), wb.max(), wc.max(), wd.max())
 
     # add dimension for addition
     wa = jnp.expand_dims(wa, axis=3)
@@ -143,8 +170,11 @@ def bilinear_sampler(img, x, y):
     wd = jnp.expand_dims(wd, axis=3)
 
     # compute output
-    out = jnp.stack([wa*Ia, wb*Ib, wc*Ic, wd*Id])
-    out - jnp.sum(out) #tf.add_n([wa*Ia, wb*Ib, wc*Ic, wd*Id])
+    out = jnp.stack([wa * Ia, wb * Ib, wc * Ic, wd * Id])
+    print("out range", out.max(), out.min())
+    print(out.shape)
+    out = jnp.sum(out, axis=0)  #tf.add_n([wa*Ia, wb*Ib, wc*Ic, wd*Id])
+    print(out.shape)
 
     return out
 
@@ -167,12 +197,12 @@ def get_pixel_value(img, x, y):
     height = shape[1]
     width = shape[2]
 
-    batch_idx = jnp.arange(batch_size)#tf.range(0, batch_size)
+    batch_idx = jnp.arange(batch_size)  #tf.range(0, batch_size)
     batch_idx = jnp.reshape(batch_idx, (batch_size, 1, 1))
     b = jnp.tile(batch_idx, (1, height, width)).astype("int32")
 
     indices = jnp.stack([b, y, x], 3)
 
-    return jnp.take(img, indices)
-
-
+    result = jnp.take(img, indices)
+    print("result", result.max(), result.min())
+    return result

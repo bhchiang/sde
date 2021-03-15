@@ -28,7 +28,7 @@ class CostVolume(nn.Module):
         def _batch_corr(left_features, right_features):
             def corr(y, x):
                 def _corr(disp_candidate):
-                    _x = x - (disp_candidate + 1)
+                    _x = x - disp_candidate
                     a = left_features[y, x, :]
                     b = right_features[y, _x, :]
                     return jnp.where(_x >= 0, jnp.mean(a * b), 0)

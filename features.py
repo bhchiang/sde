@@ -17,7 +17,7 @@ kaiming_normal = partial(init.variance_scaling, 2.0, "fan_out",
 
 def dilated_conv3x3(x,
                     features,
-                    strides=1,
+                    stride=1,
                     groups=1,
                     dilation=1,
                     name='dilated_conv3x3'):
@@ -25,7 +25,7 @@ def dilated_conv3x3(x,
     d = max(1, dilation)
     return nn.Conv(features,
                    kernel_size=(3, 3),
-                   strides=(strides, strides),
+                   strides=(stride, stride),
                    padding=((dilation, dilation), (dilation, dilation)),
                    kernel_dilation=(d, d),
                    feature_group_count=groups,
@@ -102,10 +102,9 @@ class Bottleneck(nn.Module):
 
 class BasicBlock(nn.Module):
     expansion = 1
-    __constants__ = ['downsample']
     features: int
     # norm: Any = nn.BatchNorm
-    strides: int = 1
+    stride: int = 1
     downsample: Any = None
     groups: int = 1
     base_width: int = 64
@@ -113,7 +112,7 @@ class BasicBlock(nn.Module):
     dtype: Any = jnp.float32
 
     def setup(self):
-        self.norm = nn.BatchNorm(self.features,
+        self.norm = nn.BatchNorm(use_running_average=True,
                                  scale_init=nn.initializers.ones,
                                  bias_init=nn.initializers.zeros)
 
@@ -129,9 +128,9 @@ class BasicBlock(nn.Module):
         identity = inputs
         out = dilated_conv3x3(inputs,
                               self.features,
-                              strides=self.strides,
+                              stride=self.stride,
                               name='conv1')
-        out = self.norm_layer(out)
+        out = self.norm(out)
         out = nn.relu(out)
 
         out = dilated_conv3x3(out, self.features, name='conv2')
@@ -335,8 +334,12 @@ class FeaturePyramidNetwork(nn.Module):
 
 def conv5x5(x, out_channels, stride=2, dilation=1, use_bn=True):
     bias = False if use_bn else True
-    conv = nn.Conv(out_channels, kernel_size=(5,5), strides=(stride,stride), padding=((2,2),(2,2)),
-                   kernel_dilation=(dilation,dilation), use_bias=bias)
+    conv = nn.Conv(out_channels,
+                   kernel_size=(5, 5),
+                   strides=(stride, stride),
+                   padding=((2, 2), (2, 2)),
+                   kernel_dilation=(dilation, dilation),
+                   use_bias=bias)
     if use_bn:
         out = conv(x)
         out = nn.BatchNorm(use_running_average=False)(out)
@@ -346,14 +349,19 @@ def conv5x5(x, out_channels, stride=2, dilation=1, use_bn=True):
         out = nn.relu(out)
     return out
 
+
 def convbn(x, out_planes, kernel_size, stride, pad, dilation):
     padding = dilation if dilation > 1 else pad
     # embed()
-    out = nn.Conv(out_planes, kernel_size=(kernel_size,kernel_size), strides=(stride,stride),
-                                   padding=((padding, padding),(padding,padding)),
-                                    kernel_dilation=(dilation, dilation), use_bias=False)(x)
+    out = nn.Conv(out_planes,
+                  kernel_size=(kernel_size, kernel_size),
+                  strides=(stride, stride),
+                  padding=((padding, padding), (padding, padding)),
+                  kernel_dilation=(dilation, dilation),
+                  use_bias=False)(x)
     out = nn.BatchNorm(out_planes)(out)
     return out
+
 
 class PSMNetBasicBlock(nn.Module):
     expansion = 1
@@ -361,8 +369,7 @@ class PSMNetBasicBlock(nn.Module):
     stride: int
     pad: int
     dilation: int
-    downsample: ModuleDef = None
-
+    downsample: Callable = None
 
     @nn.compact
     def __call__(self, x):
@@ -380,24 +387,28 @@ class PSMNetBasicBlock(nn.Module):
 
         return out
 
-class GCNetFeature(nn.Module):
 
+class GCNetFeature(nn.Module):
     def apply_layer(self, x, block, planes, blocks, stride, pad, dilation):
         downsample = None
-        if stride != 1: # or self.inplanes != planes * block.expansion:
+        if stride != 1:  # or self.inplanes != planes * block.expansion:
+
             def downsample(x):
                 out = nn.Conv(planes * block.expansion,
-                          kernel_size=(1,1), strides=(stride,stride), use_bias=False)(x)
+                              kernel_size=(1, 1),
+                              strides=(stride, stride),
+                              use_bias=False)(x)
 
                 out = nn.BatchNorm(planes * block.expansion)(out)
                 return out
+
         # layers = []
 
-        x = block(planes, stride,  pad,  dilation, downsample)(x)
+        x = block(planes, stride, pad, dilation, downsample)(x)
 
-              #self.inplanes = planes * block.expansion
+        #self.inplanes = planes * block.expansion
         for i in range(1, blocks):
-            x = block(planes, 1, pad, dilation,None)(x)
+            x = block(planes, 1, pad, dilation, None)(x)
 
         return x
         # return nn.Sequential(*layers)
@@ -405,9 +416,9 @@ class GCNetFeature(nn.Module):
     @nn.compact
     def __call__(self, x):
         out = conv5x5(x, 32)
-        out = self.apply_layer(out, PSMNetBasicBlock,32, 8, 1, 1, 1)
+        out = self.apply_layer(out, PSMNetBasicBlock, 32, 8, 1, 1, 1)
         out = dilated_conv3x3(out, 32)  # [32, H/2, W/2]
-        embed()
+        # embed()
         return out
 
 
@@ -466,4 +477,3 @@ if __name__ == "__main__":
     #       jax.tree_map(jnp.shape, unfreeze(init_pyramid)))
     #
     # embed()
-
