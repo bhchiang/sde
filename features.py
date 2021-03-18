@@ -110,9 +110,10 @@ class BasicBlock(nn.Module):
     base_width: int = 64
     dilation: int = 1
     dtype: Any = jnp.float32
+    train: bool = True
 
     def setup(self):
-        self.norm = nn.BatchNorm(use_running_average=True,
+        self.norm = nn.BatchNorm(use_running_average=not self.train,
                                  scale_init=nn.initializers.ones,
                                  bias_init=nn.initializers.zeros)
 
@@ -368,8 +369,8 @@ class PSMNetBasicBlock(nn.Module):
     stride: int
     pad: int
     dilation: int
-    train: bool
     downsample: Callable = None
+    train: bool = True
 
     @nn.compact
     def __call__(self, x):
@@ -419,7 +420,14 @@ class GCNetFeature(nn.Module):
     @nn.compact
     def __call__(self, x):
         out = conv5x5(x, 32)
-        out = self.apply_layer(out, PSMNetBasicBlock, 32, 8, 1, 1, 1, train)
+        out = self.apply_layer(out,
+                               PSMNetBasicBlock,
+                               32,
+                               8,
+                               1,
+                               1,
+                               1,
+                               train=self.train)
         out = dilated_conv3x3(out, 32)  # [32, H/2, W/2]
         return out
 

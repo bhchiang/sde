@@ -11,10 +11,10 @@ def _save_model(model, fname):
         f.write(bytes_output)
 
 
-# model = variables
-def _load_model(model, fname):
+# model = variables['params']
+def _load_model(variables, fname):
     path = os.path.join(model_path, fname)
-    ifile = open(pretrained_path, 'rb')
+    ifile = open(path, 'rb')
     bytes_input = ifile.read()
     ifile.close()
     variables = serialization.from_bytes(variables, bytes_input)

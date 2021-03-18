@@ -5,7 +5,13 @@ from features import BasicBlock
 from warp import disp_warp
 
 
-def conv2d(x, out_channels, kernel_size=3, stride=1, dilation=1, groups=1):
+def conv2d(x,
+           out_channels,
+           kernel_size=3,
+           stride=1,
+           dilation=1,
+           groups=1,
+           train=True):
     x = nn.Conv(out_channels,
                 kernel_size=(kernel_size, kernel_size),
                 strides=(stride, stride),
@@ -13,12 +19,14 @@ def conv2d(x, out_channels, kernel_size=3, stride=1, dilation=1, groups=1):
                 kernel_dilation=(dilation, dilation),
                 use_bias=False,
                 feature_group_count=groups)(x)
-    x = nn.BatchNorm(use_running_average=True)(x)
+    x = nn.BatchNorm(use_running_average=not train)(x)
     x = nn.leaky_relu(x, 0.2)
     return x
 
 
 class StereoDRNetRefinement(nn.Module):
+    train: bool
+
     @nn.compact
     def __call__(self, low_disp, left_img, right_img):
         # assert low_disp.dim() == 3
@@ -48,9 +56,11 @@ class StereoDRNetRefinement(nn.Module):
             [error, left_img], axis=3
         )  #torch.cat((error, left_img), dim=1)  # [B, 6, H, W]; along channels
 
-        conv1 = conv2d(concat1, 16)  # [B, 16, H, W]; conv2d(in_channels, 16)
-        conv2 = conv2d(
-            disp, 16)  # [B, 16, H, W];   conv2d(1, 16)  # on low disparity
+        conv1 = conv2d(
+            concat1, 16,
+            train=self.train)  # [B, 16, H, W]; conv2d(in_channels, 16)
+        conv2 = conv2d(disp, 16, train=self.train
+                       )  # [B, 16, H, W];   conv2d(1, 16)  # on low disparity
         concat2 = jnp.concatenate(
             [conv1, conv2], axis=3
         )  #torch.cat((conv1, conv2), dim=1)  # [B, 32, H, W] # along channels
@@ -61,9 +71,11 @@ class StereoDRNetRefinement(nn.Module):
         # print(concat2.shape)
         for i, dilation in enumerate(dilation_list):
             if i == 0:
-                out = BasicBlock(features=32, dilation=1)(concat2)
+                out = BasicBlock(features=32, dilation=1,
+                                 train=self.train)(concat2)
             else:
-                out = BasicBlock(features=32, dilation=1)(out)
+                out = BasicBlock(features=32, dilation=1,
+                                 train=self.train)(out)
         # out = [B, 32, H, W]
 
         #out = (concat2)

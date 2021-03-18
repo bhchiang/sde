@@ -10,12 +10,11 @@ import jax
 
 class DeformSimpleBottleneck(nn.Module):
     planes: int
-
     md_conv_dilation: int = 2
     num_deform_groups: int = 2
     modulation: bool = True
-
     base_width: int = 64
+    train: bool = True
 
     def setup(self):
         self.width = int(self.planes *
@@ -25,19 +24,19 @@ class DeformSimpleBottleneck(nn.Module):
     def __call__(self, x):
         identity = x
         out = conv1x1(self.width)(x)
-        out = nn.BatchNorm(use_running_average=True)(out)
+        out = nn.BatchNorm(use_running_average=not self.train)(out)
         out = nn.relu(out)
-
+        print(self.planes, self.num_deform_groups)
         out = DeformableConv(filters=self.width,
                              kernel_size=(3, 3),
                              kernel_dilation=(self.md_conv_dilation,
                                               self.md_conv_dilation),
                              num_deform_groups=self.num_deform_groups)(out)
-        out = nn.BatchNorm(use_running_average=True)(out)
+        out = nn.BatchNorm(use_running_average=not self.train)(out)
         out = nn.relu(out)
 
         out = conv1x1(self.planes)(out)
-        out = nn.BatchNorm(use_running_average=True)(out)
+        out = nn.BatchNorm(use_running_average=not self.train)(out)
 
         # TODO: Since DeformConv only supports padding = "VALID", do a hacky padding
         # to make the skip connection work for now.
@@ -46,7 +45,6 @@ class DeformSimpleBottleneck(nn.Module):
                        (self.md_conv_dilation, self.md_conv_dilation), (0, 0)))
         out += identity
         out = nn.relu(out)
-
         return out
 
 

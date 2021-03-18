@@ -25,7 +25,6 @@ _min_disp = (b * f) / max_depth
 # Load in all datasets
 # renders_path = '/home/bryan/work/Replica-Dataset/renders'
 renders_path = '/home/bryan/Dropbox/School/W21/CS 231A/replica_renders'
-target_size = 12 * 36
 
 
 def _load_image(path):
@@ -66,15 +65,17 @@ def _process_frame(frame):
     _right = _crop(frame['right'])
     _depth = _crop(frame['depth'])
 
-    _left = jax.image.resize(_left, (target_size, target_size, 3),
+    _left = jax.image.resize(_left,
+                             (common.target_size, common.target_size, 3),
                              method="bilinear")
-    _right = jax.image.resize(_right, (target_size, target_size, 3),
+    _right = jax.image.resize(_right,
+                              (common.target_size, common.target_size, 3),
                               method="bilinear")
 
     _left = _left / 255.
     _right = _right / 255.
 
-    _depth = jax.image.resize(_depth, (target_size, target_size),
+    _depth = jax.image.resize(_depth, (common.target_size, common.target_size),
                               method="bilinear")
     _disparity = _depth_to_disparity(_depth)
     _disparity = _disparity[..., jnp.newaxis]
@@ -112,7 +113,7 @@ dataset_categories = [('apartment', 3), ('office', 5), ('room', 3),
 assert (sum([count for name, count in dataset_categories]) == 18)
 
 # Amount of frames to load from each scene
-load_count = 100
+load_count = 5
 dataset_names = []
 
 for name, count in dataset_categories:

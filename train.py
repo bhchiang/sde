@@ -25,8 +25,8 @@ import serialize
 
 num_epochs = 10000
 test_idx = 10
-lr = 0.0005
-batch_size = 16
+lr = 0.0001
+batch_size = 1
 run_id = f"_sde_full_5_batch_size{batch_size}_lr_{lr}"
 # pretrained_path = "/home/bryan/work/sde/models/model__sde_full_4_epoch_78.pth"
 pretrained_path = None
@@ -45,35 +45,38 @@ def _show_image(img):
 
 
 class Model(nn.Module):
+    train: bool
+
     def setup(self):
-        self.feature_extractor = features.GCNetFeature()
+        self.feature_extractor = features.GCNetFeature(train=self.train)
         self.cost_volume_construction = cost.CostVolume(
             max_disp=common.max_disp)
         self.aggregation = aggregate.DeformSimpleBottleneck(
-            planes=common.max_disp // (2**0), num_deform_groups=1)
+            planes=common.max_disp // (2**0),
+            num_deform_groups=1,
+            train=self.train)
         self.disparity_computation = disparity.DisparityEstimation(
             max_disp=common.max_disp)
-        self.disparity_refinment = refinement.StereoDRNetRefinement()
+        self.disparity_refinment = refinement.StereoDRNetRefinement(
+            train=self.train)
 
     @nn.compact
     def __call__(self, left_img, right_img):
         left_feature = self.feature_extractor(left_img)
         right_feature = self.feature_extractor(right_img)
-        # print("Feature shapes", left_feature.shape, right_feature.shape)
-
+        print("Feature shapes", left_feature.shape, right_feature.shape)
         cost_volume = self.cost_volume_construction(left_feature,
                                                     right_feature)
-        # print("Cost volume", cost_volume.shape)
-
+        print("Cost volume", cost_volume.shape)
         aggregated = self.aggregation(cost_volume)
-        # print("Aggregated", aggregated.shape)
+        print("Aggregated", aggregated.shape)
 
         disp = self.disparity_computation(cost_volume)
-        # print("Disparity", disp.shape)
+        print("Disparity", disp.shape)
         # print(disp.max(), disp.min())
 
         refined = self.disparity_refinment(disp, left_img, right_img)
-        # print("Refined", refined.shape)
+        print("Refined", refined.shape)
         # print(refined.max(), refined.min())
         return refined
 
@@ -86,21 +89,17 @@ eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=True)
 
 print(f"train_ds: {len(train_ds)}, eval_ds: {len(eval_ds)}")
 
-# sys.exit()
-model = Model()
-print("Creating model")
+
+def get_initial_variables(key):
+    left = right = jnp.ones((1, common.target_size, common.target_size, 3),
+                            jnp.float32)
+    return Model(train=True).init(key, left, right)
 
 
-def _retrieve(idx, ds):
-    _left = jnp.array(ds[idx]['left'][jnp.newaxis, ...])
-    _right = jnp.array(ds[idx]['right'][jnp.newaxis, ...])
-    _depth = jnp.array(ds[idx]['disparity'][jnp.newaxis, ...])
-    return _left, _right, _depth
+print("Initializing variables")
+variables = get_initial_variables(key)
+print("done")
 
-
-test_left, test_right, *_ = _retrieve(test_idx, train_ds)
-variables = model.init(key, test_left, test_right)
-print("Model created")
 if pretrained_path is not None:
     print(f"    - Loading weights from {pretrained_path}")
     ifile = open(pretrained_path, 'rb')
@@ -110,16 +109,6 @@ if pretrained_path is not None:
     print("Weights loaded")
 
 
-@jax.jit
-def apply(variables, left_img, right_img):
-    y, modified_vars = model.apply(variables,
-                                   left_img,
-                                   right_img,
-                                   mutable=['batch_stats'])
-    return y
-
-
-@jax.jit
 def create_optimizer(params, learning_rate=0.0001):
     optimizer_def = optim.Adam(learning_rate=learning_rate)
     optimizer = optimizer_def.create(params)
@@ -144,33 +133,6 @@ def compute_metrics(disp, gt_disp):
     }
 
 
-@jax.jit
-def train_step(optimizer, batch, error=disparity_loss):
-    left_img = batch['left']
-    right_img = batch['right']
-    gt_disp = batch['disparity']
-
-    def _loss(params):
-        disp = apply(params, left_img, right_img)
-        return error(disp, gt_disp), disp
-
-    grad_fn = jax.value_and_grad(_loss, has_aux=True)
-    (_, disp), grad = grad_fn(optimizer.target)
-    optimizer = optimizer.apply_gradient(grad)
-    metrics = compute_metrics(disp, gt_disp)
-    return optimizer, disp, gt_disp, metrics
-
-
-@jax.jit
-def eval_step(model, batch):
-    left_img = batch['left']
-    right_img = batch['right']
-    gt_disp = batch['disparity']
-    disp = apply(model, left_img, right_img)
-    metrics = compute_metrics(disp, gt_disp)
-    return disp, gt_disp, metrics
-
-
 def save_model(optimizer, e):
     fname = f'model_{run_id}_epoch_{e}.pth'
     serialize._save_model(optimizer.target, fname)
@@ -184,7 +146,8 @@ def save_image(fname, img):
     plt.imsave(os.path.join(imgs_path, fname), img)
 
 
-optimizer = create_optimizer(variables, learning_rate=lr)
+other_vars, params = variables.pop('params')
+optimizer = create_optimizer(params, learning_rate=lr)
 print("Optimizer defined")
 # embed()
 
@@ -197,11 +160,52 @@ def _scale(x):
     return (x - x.min()) / (x.max() - x.min())
 
 
-def train_epoch(optimizer, train_loader, epoch):
+@jax.jit
+def train_step(optimizer, batch, modified_vars, error=disparity_loss):
+    left_img = batch['left']
+    right_img = batch['right']
+    gt_disp = batch['disparity']
+
+    def _loss(params, modified_vars):
+        disp, _modified_vars = Model(train=True).apply(
+            {
+                'params': params,
+                'batch_stats': modified_vars['batch_stats']
+            },
+            left_img,
+            right_img,
+            mutable=['batch_stats'])
+        aux = (disp, _modified_vars)
+        return error(disp, gt_disp), aux
+
+    grad_fn = jax.value_and_grad(_loss, has_aux=True)
+    (_, aux), grad = grad_fn(optimizer.target, modified_vars)
+    disp, modified_vars = aux
+
+    # Update params
+    # embed()
+    optimizer = optimizer.apply_gradient(grad)
+    metrics = compute_metrics(disp, gt_disp)
+    return optimizer, disp, gt_disp, metrics, modified_vars
+
+
+@jax.jit
+def eval_step(variables, batch):
+    left_img = batch['left']
+    right_img = batch['right']
+    gt_disp = batch['disparity']
+    disp, modified_vars = Model(train=False).apply(variables, left_img,
+                                                   right_img)
+    metrics = compute_metrics(disp, gt_disp)
+    return disp, gt_disp, metrics
+
+
+def train_epoch(optimizer, train_loader, epoch, modified_vars):
     batch_metrics = []
     for i, batch in enumerate(train_loader):
         _batch = _put(batch)
-        optimizer, disp, gt_disp, metrics = train_step(optimizer, _batch)
+        optimizer, disp, gt_disp, metrics, modified_vars = train_step(
+            optimizer, _batch, modified_vars)
         print(f"e = {e}, i = {i}, loss = {metrics['loss']}")
         batch_metrics.append(metrics)
 
@@ -220,14 +224,14 @@ def train_epoch(optimizer, train_loader, epoch):
         k: np.mean([metrics[k] for metrics in training_batch_metrics])
         for k in training_batch_metrics[0]
     }
-    return optimizer, training_epoch_metrics
+    return optimizer, training_epoch_metrics, modified_vars
 
 
-def eval_epoch(model, eval_loader, epoch):
+def eval_epoch(variables, eval_loader, epoch):
     batch_metrics = []
     for i, batch in enumerate(eval_loader):
         _batch = _put(batch)
-        disp, gt_disp, metrics = eval_step(model, _batch)
+        disp, gt_disp, metrics = eval_step(variables, _batch)
         batch_metrics.append(metrics)
 
         if i == 0:
@@ -248,14 +252,18 @@ def eval_epoch(model, eval_loader, epoch):
     return eval_epoch_metrics
 
 
+modified_vars = other_vars
 for e in range(num_epochs):
     print(f"    - Epoch: {e+1}")
-    optimizer, train_metrics = train_epoch(optimizer, train_loader, e + 1)
+    optimizer, train_metrics, modified_vars = train_epoch(
+        optimizer, train_loader, e + 1, modified_vars)
     print(f"train_metrics: \n {train_metrics}")
     writer.add_scalars('train', train_metrics, e + 1)
-
-    save_model(optimizer, e + 1)
-
-    eval_metrics = eval_epoch(optimizer.target, eval_loader, e + 1)
+    eval_metrics = eval_epoch(
+        {
+            'params': optimizer.target,
+            'batch_stats': modified_vars['batch_stats']
+        }, eval_loader, e + 1)
     writer.add_scalars('eval', eval_metrics, e + 1)
     print(f"eval_metrics: \n {eval_metrics}")
+    embed()
