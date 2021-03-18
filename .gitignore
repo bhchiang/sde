@@ -2,3 +2,7 @@ __pycache__
 *.swp
 *.pyc
 *.ipynb_checkpoints/
+*.ipynb
+images/
+models/
+runs/

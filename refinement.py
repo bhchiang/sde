@@ -29,7 +29,7 @@ class StereoDRNetRefinement(nn.Module):
         b_disp, h_disp, w_disp, _ = low_disp.shape  #last val is channel=1
         _, h_img, w_img, _ = left_img.shape  #last is channels, 3
         scale_factor = w_img / w_disp  # W_img/W_disp
-        print(scale_factor)
+        # print(scale_factor)
         if scale_factor == 1.0:
             disp = low_disp
         else:
@@ -37,12 +37,12 @@ class StereoDRNetRefinement(nn.Module):
                 low_disp, shape=(b_disp, h_img, w_img, 1), method='bilinear'
             )  # F.interpolate(low_disp, size=left_img.size()[-2:], mode='bilinear', align_corners=False)
             disp = disp * scale_factor
-            print("disp range", disp.max(), disp.min())
+            # print("disp range", disp.max(), disp.min())
 
         # Warp right image to left view with current disparity
         warped_right = disp_warp(right_img, disp)[0]  # [B, C, H, W]
         error = warped_right - left_img  # [B, C, H, W]
-        print("error range", error.max, error.min())
+        # print("error range", error.max, error.min())
 
         concat1 = jnp.concatenate(
             [error, left_img], axis=3
@@ -58,7 +58,7 @@ class StereoDRNetRefinement(nn.Module):
         dilation_list = [1, 2, 4, 8, 1, 1]
         #dilated_blocks = []  # nn.ModuleList()
         # self.dilated_blocks = nn.Sequential(*self.dilated_blocks)
-        print(concat2.shape)
+        # print(concat2.shape)
         for i, dilation in enumerate(dilation_list):
             if i == 0:
                 out = BasicBlock(features=32, dilation=1)(concat2)
@@ -76,6 +76,6 @@ class StereoDRNetRefinement(nn.Module):
         disp = nn.relu(
             disp + residual_disp
         )  #F.relu(disp + residual_disp, inplace=True)  # [B, 1, H, W]
-        disp = jnp.squeeze(disp, axis=3)  #disp.squeeze(1)  # [B, H, W]
+        # disp = jnp.squeeze(disp, axis=3)  #disp.squeeze(1)  # [B, H, W]
 
         return disp

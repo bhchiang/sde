@@ -80,16 +80,16 @@ def disp_warp(img, disp, padding_mode='border'):
     )  #torch.cat((-disp, torch.zeros_like(disp)), dim=1)  # [B, 2, H, W]
     sample_grid = grid + offset
     sample_grid = normalize_coords(sample_grid)  # [B, H, W, 2] in [-1, 1]
-    print("sample grid", sample_grid.max(), sample_grid.min())
+    # print("sample grid", sample_grid.max(), sample_grid.min())
     y = sample_grid[..., 0]
     x = sample_grid[..., 1]
-    print(y.shape, x.shape)
+    # print(y.shape, x.shape)
     warped_img = bilinear_sampler(
         img, x, y
     )  #TODO: UH,,, F... #F.grid_sample(img, sample_grid, mode='bilinear', padding_mode=padding_mode)
-    print(img.max(), img.min())
-    print(warped_img.max(), warped_img.min())
-    print(warped_img.shape)
+    # print(img.max(), img.min())
+    # print(warped_img.max(), warped_img.min())
+    # print(warped_img.shape)
     #
     valid_mask = None
     #TODO: is this mask used ?! the fuck
@@ -161,7 +161,7 @@ def bilinear_sampler(img, x, y):
     wb = (x1 - x) * (y - y0)
     wc = (x - x0) * (y1 - y)
     wd = (x - x0) * (y - y0)
-    print(wa.max(), wb.max(), wc.max(), wd.max())
+    # print(wa.max(), wb.max(), wc.max(), wd.max())
 
     # add dimension for addition
     wa = jnp.expand_dims(wa, axis=3)
@@ -171,10 +171,10 @@ def bilinear_sampler(img, x, y):
 
     # compute output
     out = jnp.stack([wa * Ia, wb * Ib, wc * Ic, wd * Id])
-    print("out range", out.max(), out.min())
-    print(out.shape)
+    # print("out range", out.max(), out.min())
+    # print(out.shape)
     out = jnp.sum(out, axis=0)  #tf.add_n([wa*Ia, wb*Ib, wc*Ic, wd*Id])
-    print(out.shape)
+    # print(out.shape)
 
     return out
 
@@ -204,5 +204,5 @@ def get_pixel_value(img, x, y):
     indices = jnp.stack([b, y, x], 3)
 
     result = jnp.take(img, indices)
-    print("result", result.max(), result.min())
+    # print("result", result.max(), result.min())
     return result

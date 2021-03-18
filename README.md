@@ -1,3 +1,3 @@
-# ede
+# sde
 
-Efficient Depth Estimation
+Stereo Depth Estimation
