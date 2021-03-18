@@ -26,10 +26,11 @@ import serialize
 num_epochs = 10000
 test_idx = 10
 lr = 0.0005
-batch_size = 16
-run_id = f"_sde_full_5_batch_size{batch_size}_lr_{lr}"
-# pretrained_path = "/home/bryan/work/sde/models/model__sde_full_4_epoch_78.pth"
-pretrained_path = None
+batch_size = 14
+run_id = f"_RESUME_sde_full_4from78__size{batch_size}_lr_{lr}"
+pretrained_name = "model__sde_full_4_epoch_78.pth"
+# pretrained_name = "model__test_load_batch_size8_lr_0.0005_epoch_1.pth"
+pretrained_path = os.path.join(serialize.model_path, pretrained_name)
 
 imgs_path = "images/"
 os.makedirs(imgs_path, exist_ok=True)
@@ -119,7 +120,6 @@ def apply(variables, left_img, right_img):
     return y
 
 
-@jax.jit
 def create_optimizer(params, learning_rate=0.0001):
     optimizer_def = optim.Adam(learning_rate=learning_rate)
     optimizer = optimizer_def.create(params)
