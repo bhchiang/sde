@@ -10,7 +10,8 @@ from IPython import embed
 from jax import jit, random
 from skimage import io, transform
 from tensorboardX import SummaryWriter
-from torch.utils.data import DataLoader, Dataset, ConcatDataset
+from torch.utils.data import DataLoader, Dataset, ConcatDataset, random_split
+import torch
 from tqdm import tqdm
 
 import aggregate
@@ -25,12 +26,13 @@ import serialize
 
 num_epochs = 10000
 test_idx = 10
-lr = 0.0005
+lr = 0.0003
 batch_size = 8
-run_id = f"_single_scene_test_batch_size{batch_size}_lr_{lr}"
+run_id = f"_small_intrasceneRESUME3_bs_{batch_size}_lr_{lr}"
 # pretrained_name = "model__sde_full_4_epoch_78.pth"
-pretrained_name = "good/aa4_model_10000epoch.pth"
+# pretrained_name = "good/aa4_model_10000epoch.pth"
 # pretrained_name = "model__test_load_batch_size8_lr_0.0005_epoch_1.pth"
+pretrained_name = "model__small_intrasceneRESUME2_bs_8_lr_0.0001_epoch_32.pth"
 pretrained_path = os.path.join(serialize.model_path, pretrained_name)
 imgs_path = "images/"
 os.makedirs(imgs_path, exist_ok=True)
@@ -82,8 +84,18 @@ class Model(nn.Module):
 # train_ds = data._load_train_dataset()
 # eval_ds = data._load_eval_dataset()
 
-eval_ds = data._load_single_dataset("hotel_0", offset=80, load_count=20)
-train_ds = data._load_single_dataset("hotel_0", load_count=80)
+names = ["hotel_0", "apartment_1", "office_2", "frl_apartment_3"]
+total_ds = data._load_datasets(names)
+
+# eval_ds = data._load_single_dataset("hotel_0", offset=80, load_count=20)
+# train_ds = data._load_single_dataset("hotel_0", load_count=80)
+
+train_len = int(len(total_ds) * 0.8)
+eval_len = len(total_ds) - train_len
+lengths = (train_len, eval_len)
+train_ds, eval_ds = random_split(total_ds,
+                                 lengths,
+                                 generator=torch.Generator().manual_seed(42))
 
 train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
 eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=True)
@@ -139,11 +151,13 @@ def disparity_loss(disp, gt_disp):
 def compute_metrics(disp, gt_disp):
     epe = metrics._epe(disp, gt_disp)
     loss = disparity_loss(disp, gt_disp)
+    pixel1 = metrics._1pixel(disp, gt_disp)
 
     # Add more metrics if necessary
     return {
         'epe': epe,
         'loss': loss,
+        'pixel1': pixel1,
     }
 
 
@@ -189,7 +203,6 @@ def save_image(fname, img):
 
 optimizer = create_optimizer(variables, learning_rate=lr)
 print("Optimizer defined")
-# embed()
 
 
 def _format(x):
