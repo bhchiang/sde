@@ -87,7 +87,8 @@ def _process_frame(frame):
 
 
 class StereoDepthDataset(Dataset):
-    def __init__(self, root, load_count=None):
+    def __init__(self, root, load_count=None, offset=0):
+        self.offset = offset
         self.root = root
         self.num_folder_frames = len(os.listdir(root)) // 3
         self.num_frames = self.num_folder_frames if load_count == None else load_count
@@ -102,7 +103,9 @@ class StereoDepthDataset(Dataset):
     def __len__(self):
         return self.num_frames
 
-    def __getitem__(self, frame_num):
+    def __getitem__(self, idx):
+        frame_num = self.offset + idx
+        # print(frame_num)
         frame = _load_frame(self.root, frame_num)
         return _process_frame(frame)
 
@@ -112,7 +115,7 @@ dataset_categories = [('apartment', 3), ('office', 5), ('room', 3),
 assert (sum([count for name, count in dataset_categories]) == 18)
 
 # Amount of frames to load from each scene
-load_count = 100
+load_count = 20
 dataset_names = []
 
 for name, count in dataset_categories:
@@ -121,16 +124,26 @@ for name, count in dataset_categories:
         dataset_names.append(_name)
 
 
-def _load_datasets(names):
+def _load_single_dataset(name, load_count=None, offset=0):
+    print(f"Creating dataset for {name}")
+    root = os.path.join(renders_path, name)
+    _ds = None
+    if not os.path.exists(root):
+        print(f"Dataset root {root} does not exist.")
+        # raise ValueError(f"Root {root} does not exist.")
+    else:
+        _ds = StereoDepthDataset(root=root,
+                                 load_count=load_count,
+                                 offset=offset)
+    return _ds
+
+
+def _load_datasets(names, load_count=None):
     datasets = []
+
     for name in names:
-        print(f"Creating dataset for {name}")
-        root = os.path.join(renders_path, name)
-        if not os.path.exists(root):
-            print(f"Dataset root {root} does not exist.")
-            # raise ValueError(f"Root {root} does not exist.")
-        else:
-            _ds = StereoDepthDataset(root=root, load_count=load_count)
+        _ds = _load_single_dataset(name, load_count=load_count)
+        if _ds is not None:
             datasets.append(_ds)
 
     ds = ConcatDataset(datasets)
@@ -141,8 +154,8 @@ eval_names = ["room_1", "office_1", "room_2"]
 train_names = [x for x in dataset_names if x not in eval_names]
 
 
-def _load_train_dataset():
-    train_ds = _load_datasets(train_names)
+def _load_train_dataset(load_count=None):
+    train_ds = _load_datasets(train_names, load_count=None)
     assert len(train_ds) == len(train_names) * load_count
     return train_ds
 

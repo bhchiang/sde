@@ -27,7 +27,7 @@ num_epochs = 10000
 test_idx = 10
 lr = 0.0005
 batch_size = 8
-run_id = f"_single_scene_test_batch_size{batch_size}_lr_{lr}"
+run_id = f"evaluate_overfitted_model"
 # pretrained_name = "model__sde_full_4_epoch_78.pth"
 pretrained_name = "good/aa4_model_10000epoch.pth"
 # pretrained_name = "model__test_load_batch_size8_lr_0.0005_epoch_1.pth"
@@ -79,16 +79,11 @@ class Model(nn.Module):
         return refined
 
 
-# train_ds = data._load_train_dataset()
-# eval_ds = data._load_eval_dataset()
-
-eval_ds = data._load_single_dataset("hotel_0", offset=80, load_count=20)
-train_ds = data._load_single_dataset("hotel_0", load_count=80)
-
-train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+train_ds = data._load_single_dataset("hotel_0", offset=80, load_count=20)
+eval_ds = data._load_single_dataset("hotel_0", load_count=80)
 eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=True)
-
-print(f"train_ds: {len(train_ds)}, eval_ds: {len(eval_ds)}")
+embed()
+print(f"eval_ds: {len(eval_ds)}")
 
 # sys.exit()
 model = Model()
@@ -105,13 +100,13 @@ def _retrieve(idx, ds):
 test_left, test_right, *_ = _retrieve(test_idx, train_ds)
 variables = model.init(key, test_left, test_right)
 print("Model created")
-if pretrained_path is not None:
-    print(f"    - Loading weights from {pretrained_path}")
-    ifile = open(pretrained_path, 'rb')
-    bytes_input = ifile.read()
-    ifile.close()
-    variables = serialization.from_bytes(variables, bytes_input)
-    print("Weights loaded")
+# if pretrained_path is not None:
+#     print(f"    - Loading weights from {pretrained_path}")
+#     ifile = open(pretrained_path, 'rb')
+#     bytes_input = ifile.read()
+#     ifile.close()
+#     variables = serialization.from_bytes(variables, bytes_input)
+#     print("Weights loaded")
 
 
 @jax.jit
@@ -231,6 +226,7 @@ def eval_epoch(model, eval_loader, epoch):
     for i, batch in enumerate(eval_loader):
         _batch = _put(batch)
         disp, gt_disp, metrics = eval_step(model, _batch)
+        print(metrics)
         batch_metrics.append(metrics)
 
         if i == 0:
@@ -251,14 +247,7 @@ def eval_epoch(model, eval_loader, epoch):
     return eval_epoch_metrics
 
 
-for e in range(num_epochs):
-    print(f"    - Epoch: {e+1}")
-    optimizer, train_metrics = train_epoch(optimizer, train_loader, e + 1)
-    print(f"train_metrics: \n {train_metrics}")
-    writer.add_scalars('train', train_metrics, e + 1)
-
-    save_model(optimizer, e + 1)
-
-    eval_metrics = eval_epoch(optimizer.target, eval_loader, e + 1)
-    writer.add_scalars('eval', eval_metrics, e + 1)
-    print(f"eval_metrics: \n {eval_metrics}")
+e = 0
+eval_metrics = eval_epoch(optimizer.target, eval_loader, e + 1)
+writer.add_scalars('eval', eval_metrics, e + 1)
+print(f"eval_metrics: \n {eval_metrics}")
