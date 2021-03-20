@@ -28,11 +28,12 @@ num_epochs = 10000
 test_idx = 10
 lr = 0.0003
 batch_size = 8
-run_id = f"_small_intrasceneRESUME3_bs_{batch_size}_lr_{lr}"
+run_id = f"_small_intrasceneRESUME4_bs_{batch_size}_lr_{lr}"
 # pretrained_name = "model__sde_full_4_epoch_78.pth"
 # pretrained_name = "good/aa4_model_10000epoch.pth"
 # pretrained_name = "model__test_load_batch_size8_lr_0.0005_epoch_1.pth"
-pretrained_name = "model__small_intrasceneRESUME2_bs_8_lr_0.0001_epoch_32.pth"
+# pretrained_name = "model__small_intrasceneRESUME2_bs_8_lr_0.0001_epoch_32.pth"
+pretrained_name = "model__small_intrasceneRESUME3_bs_8_lr_0.0003_epoch_2074.pth"
 pretrained_path = os.path.join(serialize.model_path, pretrained_name)
 imgs_path = "images/"
 os.makedirs(imgs_path, exist_ok=True)
@@ -98,7 +99,7 @@ train_ds, eval_ds = random_split(total_ds,
                                  generator=torch.Generator().manual_seed(42))
 
 train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=True)
+eval_loader = DataLoader(eval_ds, batch_size=batch_size)
 
 print(f"train_ds: {len(train_ds)}, eval_ds: {len(eval_ds)}")
 
